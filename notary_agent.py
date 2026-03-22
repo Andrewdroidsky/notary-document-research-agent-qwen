@@ -148,6 +148,86 @@ PART_03_SEGMENTS = [
     },
 ]
 
+PART_03_CANONICAL_BLOCKS = {
+    "I": "Базовые отрасли материального права",
+    "II": "Процессуальное право (ОБЯЗАТЕЛЬНО)",
+    "III": "Налоговое право (ОБЯЗАТЕЛЬНО)",
+    "IV": "Финансовое право (ОБЯЗАТЕЛЬНО)",
+    "V": "Административное право и контроль",
+    "VI": "Информационное право и цифровая среда",
+    "VII": "Архивное право и делопроизводство",
+    "VIII": "Противодействие легализации доходов (ПОД/ФТ)",
+    "IX": "Международное частное право",
+    "X": "Подзаконные акты (ОБЯЗАТЕЛЬНО УЧИТЫВАТЬ)",
+    "XI": "Акты нотариального сообщества",
+    "XII": "Судебные разъяснения",
+    "XIII": "Комплексные отрасли",
+    "XIV": "Нотариальное право и организация нотариата",
+    "XV": "Регистрационное право и государственные реестры",
+    "XVI": "Жилищное право",
+    "XVII": "Наследственное право",
+    "XVIII": "Вещное право и сделки с имуществом",
+    "XIX": "Банкротство",
+    "XX": "Валютное регулирование и комплаенс сделок",
+    "XXI": "Доказательственное право и обеспечение доказательств",
+    "XXII": "Интеллектуальные права",
+    "XXIII": "Потребительские и “соц”-кейсы в нотариальной форме",
+    "XXIV": "Таможенное право",
+    "XXV": "Уголовное право",
+    "XXVI": "Экологическое право",
+    "XXVII": "Вещное право",
+    "XXVIII": "Обязательственное право",
+    "XXIX": "Рекламное право",
+    "XXX": "Природоресурсное право",
+    "XXXI": "Градостроительное право",
+    "XXXII": "Воздушное право / гражданская авиация",
+    "XXXIII": "Транспортное право: морское и внутренний водный транспорт",
+    "XXXIV": "Бюджетное право",
+    "XXXV": "Антимонопольное / конкурентное право",
+    "XXXVI": "Миграционное и гражданство",
+    "XXXVII": "Энергетическое право",
+}
+
+PART_03_FORBIDDEN_LEGACY_HEADINGS = (
+    "БАЗОВЫЕ ПРОФИЛЬНЫЕ АКТЫ",
+    "СПЕЦИАЛЬНЫЕ НОТАРИАЛЬНЫЕ ПОЛНОМОЧИЯ НОТАРИУСА",
+    "ПОЛНОМОЧИЯ ДОЛЖНОСТНЫХ ЛИЦ МЕСТНОГО САМОУПРАВЛЕНИЯ",
+    "ПОЛНОМОЧИЯ КОНСУЛЬСКИХ ДОЛЖНОСТНЫХ ЛИЦ",
+    "ПОРЯДОК СОВЕРШЕНИЯ НОТАРИАЛЬНОГО ДЕЙСТВИЯ",
+    "ТРЕБОВАНИЯ К ПРЕДСТАВЛЯЕМЫМ ДОКУМЕНТАМ",
+    "ТРЕБОВАНИЯ К НОТАРИАЛЬНО ОФОРМЛЯЕМОМУ ДОКУМЕНТУ",
+    "УДОСТОВЕРИТЕЛЬНЫЕ НАДПИСИ И ФОРМЫ",
+    "РЕГИСТРАЦИЯ НОТАРИАЛЬНОГО ДЕЙСТВИЯ",
+    "ДЕЛОПРОИЗВОДСТВО И ХРАНЕНИЕ",
+    "УСТАНОВЛЕНИЕ ЛИЧНОСТИ ЗАЯВИТЕЛЯ",
+    "ПРОВЕРКА ДЕЕСПОСОБНОСТИ/ПРАВОСПОСОБНОСТИ/ПОЛНОМОЧИЙ",
+    "ОТКАЗ В СОВЕРШЕНИИ ДЕЙСТВИЯ",
+    "СУДЕБНОЕ ОБЖАЛОВАНИЕ",
+    "ФЕДЕРАЛЬНЫЙ ТАРИФ",
+    "НАЛОГОВЫЕ ЛЬГОТЫ",
+    "РЕГИОНАЛЬНЫЙ ТАРИФ",
+    "ЭЛЕКТРОННАЯ ФОРМА И ЕИС",
+    "УДАЛЕННОЕ СОВЕРШЕНИЕ",
+    "МЕЖДУНАРОДНЫЙ ЭЛЕМЕНТ / ИНОСТРАННЫЕ ДОКУМЕНТЫ",
+    "ЛЕГАЛИЗАЦИЯ / АПОСТИЛЬ",
+    "НОТАРИАЛЬНЫЕ ДОКУМЕНТЫ И АРХИВ",
+    "ПОДЗАКОННЫЕ АКТЫ МИНЮСТА",
+    "АКТЫ ФНП",
+    "РАЗЪЯСНЕНИЯ ВЫСШЕЙ СУДЕБНОЙ ИНСТАНЦИИ",
+    "ВЕДОМСТВЕННЫЕ АКТЫ ИНЫХ ОРГАНОВ",
+    "СПЕЦИАЛЬНЫЕ ЗАПРЕТЫ И ОГРАНИЧЕНИЯ НА ВИДЫ ДОКУМЕНТОВ",
+    "ЯЗЫК ДОКУМЕНТА / ПЕРЕВОД",
+    "КОПИЯ С КОПИИ",
+    "ВЫПИСКА ИЗ ДОКУМЕНТА",
+    "МНОГОСТРАНИЧНЫЕ ДОКУМЕНТЫ, СКРЕПЛЕНИЕ, ЦЕЛОСТНОСТЬ",
+    "ОТМЕТКА О ТОМ, ЧТО ЧАСТЬ ОРИГИНАЛА СОДЕРЖИТ КОПИЮ ИНОГО ДОКУМЕНТА",
+    "ПРОВЕРКА СОДЕРЖАНИЯ ДОКУМЕНТА НА ЗАКОННОСТЬ",
+    "СПЕЦИАЛЬНЫЕ ПРАВИЛА ДЛЯ ОРГАНОВ МСУ",
+    "СПЕЦИАЛЬНЫЕ ПРАВИЛА ДЛЯ КОНСУЛОВ",
+    "ДИСЦИПЛИНАРНО-КОНТРОЛЬНЫЙ СЛОЙ",
+    "РЕГИОНАЛЬНО-ЛОКАЛЬНЫЙ СЛОЙ НОТАРИАЛЬНЫХ ПАЛАТ",
+)
+
 PART_04_SEGMENTS = [
     {
         "segment_id": 1,
@@ -1682,6 +1762,11 @@ def build_part_03_operator_sequence(run_workspace: SubtopicRunWorkspace) -> str:
 
 def build_part_03_message(run_workspace: SubtopicRunWorkspace, segment: dict[str, Any]) -> str:
     part_03_input = next(part.content.strip() for part in run_workspace.parts if part.number == 3)
+    segment_start, segment_end = parse_roman_range_label(segment["label"])
+    canonical_lines = []
+    canonical_items = list(PART_03_CANONICAL_BLOCKS.items())[segment_start - 1 : segment_end]
+    for roman, title in canonical_items:
+        canonical_lines.append(f"- `{roman}. {title}`")
     lines = [
         f"# Part 03 Range {segment['segment_id']}: {segment['label']}",
         "",
@@ -1693,7 +1778,11 @@ def build_part_03_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
         "- После каждого блока дать найдено/не выявлено и документы строго после соответствующего блока.",
         "- Все URL, домены и идентификаторы ресурсов держать только внутри fenced code blocks.",
         "",
+        "Канонические блоки этого диапазона:",
+        "",
     ]
+    lines.extend(canonical_lines)
+    lines.extend(["", "BLOCKER: любое переименование или подмена этих заголовков = ошибка.", ""])
     if segment["segment_id"] == 1:
         lines.extend(
             [
@@ -2226,6 +2315,18 @@ def parse_numeric_range_label(label: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def parse_roman_range_label(label: str) -> tuple[int, int]:
+    keys = list(PART_03_CANONICAL_BLOCKS.keys())
+    match = re.match(r"^\s*([IVXLCDM]+)\D+([IVXLCDM]+)\s*$", label)
+    if not match:
+        raise ValueError(f"Unable to parse roman range label: {label}")
+    start_roman = match.group(1)
+    end_roman = match.group(2)
+    if start_roman not in keys or end_roman not in keys:
+        raise ValueError(f"Unknown roman range label: {label}")
+    return keys.index(start_roman) + 1, keys.index(end_roman) + 1
+
+
 def find_foreign_subtopic_ids(text: str, expected_subtopic_id: str) -> list[str]:
     patterns = [
         re.compile(r"(?im)^\s*ТЕМА:\s*(?P<id>\d{1,2}\.\d{1,2}\.\d{1,2})\b"),
@@ -2273,6 +2374,41 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
     return issues
 
 
+def extract_part_03_headings(text: str) -> list[tuple[str, str]]:
+    headings: list[tuple[str, str]] = []
+    roman_pattern = "|".join(PART_03_CANONICAL_BLOCKS.keys())
+    pattern = re.compile(rf"(?m)^\s*(?P<roman>{roman_pattern})\.\s+(?P<title>.+?)(?:\s+[—-]\s+|\s*$)")
+    for match in pattern.finditer(text):
+        roman = match.group("roman")
+        title = match.group("title").strip()
+        title = re.sub(r"^\*+|\*+$", "", title).strip()
+        headings.append((roman, title))
+    return headings
+
+
+def validate_part_03_canonical_structure(text: str) -> list[str]:
+    issues: list[str] = []
+    stripped = text.strip()
+    for legacy_heading in PART_03_FORBIDDEN_LEGACY_HEADINGS:
+        if legacy_heading in stripped:
+            issues.append(
+                f"Part 3 must use canonical VERSION 18 search-sphere headings, found legacy heading: {legacy_heading}"
+            )
+
+    headings = extract_part_03_headings(stripped)
+    if not headings:
+        issues.append("Part 3 must contain canonical I–XXXVII headings from VERSION 18")
+        return issues
+
+    for roman, title in headings:
+        expected = PART_03_CANONICAL_BLOCKS.get(roman)
+        if expected and title != expected:
+            issues.append(
+                f"Part 3 heading `{roman}. {title}` does not match canonical VERSION 18 heading `{roman}. {expected}`"
+            )
+    return issues
+
+
 def validate_part_03_segment_output(text: str) -> list[str]:
     issues: list[str] = []
     stripped = text.strip()
@@ -2290,6 +2426,7 @@ def validate_part_03_segment_output(text: str) -> list[str]:
     if external_links:
         preview = ", ".join(external_links[:5])
         issues.append(f"Part 3 range output has link-like tokens outside code blocks: {preview}")
+    issues.extend(validate_part_03_canonical_structure(stripped))
     return issues
 
 
@@ -2993,6 +3130,10 @@ def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) 
         if is_response_stub(content):
             skipped_stub_parts.append(part.number)
             continue
+        if part.number == 3:
+            issues = validate_part_03_canonical_structure(content)
+            if issues:
+                raise RuntimeError("Part 3 output validation failed:\n- " + "\n- ".join(issues))
         content = sanitize_substantive_part_output(run_workspace, part.number, content).strip()
         if not content:
             skipped_stub_parts.append(part.number)
