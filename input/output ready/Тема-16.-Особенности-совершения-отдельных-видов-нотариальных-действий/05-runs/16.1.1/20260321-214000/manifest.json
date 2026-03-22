@@ -1,0 +1,106 @@
+{
+  "generated_at": "2026-03-21T17:40:00+00:00",
+  "status": "subtopic_run_prepared",
+  "theme_id": "16",
+  "theme_title": "Тема 16. Особенности совершения отдельных видов нотариальных действий.",
+  "subtopic_id": "16.1.1",
+  "subtopic_line": "16.1.1. Свидетельствование верности копий документов, копий с копий документов и выписок из них.",
+  "run_dir": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000",
+  "order_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\02-orders\\16.1.1.md",
+  "packet_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\03-packets\\16.1.1.md",
+  "canonical_final_md_target": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\04-output\\md\\16.1.1.md",
+  "canonical_final_docx_target": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\04-output\\docx\\16.1.1.docx",
+  "final_contract_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\03-final\\final.contract.json",
+  "final_skeleton_md": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\03-final\\final.skeleton.md",
+  "final_skeleton_docx": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\03-final\\final.skeleton.docx",
+  "parts": [
+    {
+      "part_number": 1,
+      "heading": "ЧАСТЬ 1 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "rules_confirmation_wait_go",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-01.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-01.md",
+      "status": "ready"
+    },
+    {
+      "part_number": 2,
+      "heading": "ЧАСТЬ 2 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "core_answer_after_go",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-02.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-02.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 3,
+      "heading": "ЧАСТЬ 3 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "targeted_follow_up",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-03.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-03.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 4,
+      "heading": "ЧАСТЬ 4 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "coverage_blocks",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-04.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-04.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 5,
+      "heading": "ЧАСТЬ 5 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "layer_blocks",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-05.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-05.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 6,
+      "heading": "ЧАСТЬ 6 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "three_filters_gap_check",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-06.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-06.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 7,
+      "heading": "ЧАСТЬ 7 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "new_documents_without_repeats",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-07.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-07.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 8,
+      "heading": "ЧАСТЬ 8 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "federal_level_delta_check",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-08.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-08.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 9,
+      "heading": "ЧАСТЬ 9 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "delta_audit",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-09.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-09.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 10,
+      "heading": "ЧАСТЬ 10 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "mini_summary",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-10.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-10.md",
+      "status": "blocked_until_go"
+    },
+    {
+      "part_number": 11,
+      "heading": "ЧАСТЬ 11 ПРИКАЗА НА ВЫПОЛНЕНИЕ МАСТЕР-ПРОМПТА",
+      "execution_mode": "diary_tasks_only",
+      "input_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\01-stage-inputs\\part-11.md",
+      "output_file": "C:\\Users\\koper\\OneDrive\\Documents\\New project\\input\\output ready\\Тема-16.-Особенности-совершения-отдельных-видов-нотариальных-действий\\05-runs\\16.1.1\\20260321-214000\\02-stage-outputs\\part-11.md",
+      "status": "blocked_until_go"
+    }
+  ]
+}

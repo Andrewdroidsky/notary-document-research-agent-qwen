@@ -1,0 +1,4 @@
+interface:
+  display_name: "Notary Outline Builder"
+  short_description: "Build or validate final notary topic outlines"
+  default_prompt: "Build the approved outline for this main notarial theme and separate tariff subtopics correctly."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Notary Order Renderer"
+  short_description: "Render приказ copies for final notary subtopics"
+  default_prompt: "Render order copies for each approved notarial subtopic without changing the canonical template."

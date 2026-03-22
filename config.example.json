@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5",
+  "reasoning_effort": "low",
+  "store": true,
+  "include_sources": true,
+  "request_timeout_seconds": 600,
+  "output_root": "runs",
+  "web_allowed_domains": []
+}

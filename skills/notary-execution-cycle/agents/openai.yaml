@@ -1,0 +1,4 @@
+interface:
+  display_name: "Notary Execution Cycle"
+  short_description: "Run the staged 11-part notary execution flow"
+  default_prompt: "Execute one final notarial subtopic through the staged order parts while preserving strict link formatting and anti-repeat behavior."

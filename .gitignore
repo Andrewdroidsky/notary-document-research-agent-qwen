@@ -1,0 +1,7 @@
+runs/
+imports/
+__pycache__/
+*.pyc
+.env
+part-*-capture*.md
+tmp_part02_16.1.1.md

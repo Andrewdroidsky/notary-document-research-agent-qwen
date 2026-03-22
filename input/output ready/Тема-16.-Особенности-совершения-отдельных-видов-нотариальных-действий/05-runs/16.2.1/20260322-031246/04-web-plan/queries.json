@@ -1,0 +1,101 @@
+[
+  {
+    "id": "q01",
+    "purpose": "exact_phrase",
+    "query": "\"Свидетельствование подлинности подписи на документах\" нотариус",
+    "preferred_domains": [
+      "publication.pravo.gov.ru",
+      "pravo.gov.ru",
+      "consultant.ru",
+      "garant.ru"
+    ],
+    "notes": "Стартовый точный поиск по полной формулировке подтемы."
+  },
+  {
+    "id": "q02",
+    "purpose": "official_anchor",
+    "query": "\"Свидетельствование подлинности подписи на документах\" site:publication.pravo.gov.ru OR site:pravo.gov.ru",
+    "preferred_domains": [
+      "publication.pravo.gov.ru",
+      "pravo.gov.ru"
+    ],
+    "notes": "Искать официальный якорь URL1."
+  },
+  {
+    "id": "q03",
+    "purpose": "readable_url2",
+    "query": "\"Свидетельствование подлинности подписи на документах\" site:consultant.ru OR site:garant.ru OR site:docs.cntd.ru",
+    "preferred_domains": [
+      "consultant.ru",
+      "garant.ru",
+      "docs.cntd.ru"
+    ],
+    "notes": "Подбирать читаемый VERIFIED URL2 только после сверки реквизитов."
+  },
+  {
+    "id": "q04",
+    "purpose": "notariat_basics",
+    "query": "\"Свидетельствование подлинности подписи на документах\" \"Основы законодательства Российской Федерации о нотариате\"",
+    "preferred_domains": [
+      "pravo.gov.ru",
+      "consultant.ru",
+      "garant.ru"
+    ],
+    "notes": "Проверить профильный базовый слой нотариального регулирования."
+  },
+  {
+    "id": "q05",
+    "purpose": "minjust_procedure",
+    "query": "\"Свидетельствование подлинности подписи на документах\" нотариат Минюст порядок",
+    "preferred_domains": [
+      "minjust.gov.ru",
+      "publication.pravo.gov.ru",
+      "pravo.gov.ru"
+    ],
+    "notes": "Процедурный и подзаконный слой Минюста."
+  },
+  {
+    "id": "q06",
+    "purpose": "fnp_materials",
+    "query": "\"Свидетельствование подлинности подписи на документах\" site:notariat.ru",
+    "preferred_domains": [
+      "notariat.ru"
+    ],
+    "notes": "Методический слой и документы нотариального сообщества."
+  },
+  {
+    "id": "q07",
+    "purpose": "court_clarifications",
+    "query": "\"Свидетельствование подлинности подписи на документах\" нотариус обзор практика пленум",
+    "preferred_domains": [
+      "vsrf.ru",
+      "consultant.ru",
+      "garant.ru"
+    ],
+    "notes": "Проверить применимые разъяснения и обзоры судебной практики."
+  },
+  {
+    "id": "q08",
+    "purpose": "procedure_variants",
+    "query": "\"Свидетельствование подлинности подписи на документах\" порядок совершения нотариального действия",
+    "preferred_domains": [
+      "pravo.gov.ru",
+      "minjust.gov.ru",
+      "consultant.ru",
+      "garant.ru"
+    ],
+    "notes": "Уточнить процедуру, участников, сроки и ограничения по действию."
+  },
+  {
+    "id": "q09",
+    "purpose": "forms_registers",
+    "query": "\"Свидетельствование подлинности подписи на документах\" форма реестр нотариус",
+    "preferred_domains": [
+      "minjust.gov.ru",
+      "notariat.ru",
+      "consultant.ru",
+      "garant.ru"
+    ],
+    "notes": "Проверить формы, реестровый, делопроизводственный и учетный слой."
+  }
+]

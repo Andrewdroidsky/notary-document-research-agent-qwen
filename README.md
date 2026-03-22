@@ -1,0 +1,226 @@
+# Notary Agent
+
+Локальный агент для вашей нотариальной стажировки.
+
+Текущий рабочий контур построен вокруг вашего реального workflow:
+
+- `manual-workflow.md` = компас;
+- `Промпт по поиску документов 18.md` = стратегия;
+- `Текст приказа ... .md` = тактика;
+- `User and LLM Interaction in LLM Contest Window.md` = образец механики исполнения;
+- `Утверждаю.md` = источник основной темы и исходных подтем.
+
+Если по теме уже есть утвержденное Оглавление, его нужно класть в:
+
+- `input\workflow\outline overrides\<номер темы>.md`
+
+Тогда агент использует именно это approved outline и строит копии приказов уже по конечным подпунктам вида `16.1.1`, `16.1.2` и т.д.
+
+## Что умеет
+
+- брать основную тему из `Утверждаю.md`;
+- автоматически собирать Оглавление по исходным подпунктам темы;
+- создавать копии приказа под каждую подтему;
+- собирать execution packets по каждой подтеме в `input\output ready`;
+- готовить staged run-workspace по одной конечной подтеме с разбиением копии приказа на Части 1-11;
+- раскладывать контекст, шаблоны и целевые пути для будущих `.md` и `.docx`;
+- импортировать существующую папку темы из `docx/md` в рабочий `md-first` формат;
+- собирать единый запрос для модели по теме;
+- сохранять `request.json`, `response.json`, итоговый `md` и `docx`;
+- работать в режиме `--dry-run`, чтобы сначала проверить сборку задания без вызова API.
+
+## Project Skills
+
+В проекте созданы 3 локальные skills:
+
+- `skills\notary-outline-builder`
+- `skills\notary-order-renderer`
+- `skills\notary-execution-cycle`
+
+Их задача:
+
+- фиксировать правила построения Оглавления;
+- фиксировать правила рендеринга копий приказа;
+- фиксировать staged execution flow по Частям 1-11.
+
+## Быстрый старт
+
+### 1. Подготовить рабочий пакет по основной теме
+
+Если сначала нужен только draft Оглавления:
+
+```powershell
+python .\notary_agent.py draft-main-theme-outline "Тема 16. Особенности совершения отдельных видов нотариальных действий."
+```
+
+Этот режим:
+
+- готовит `outline.generated.md`;
+- готовит `outline.review.md`;
+- не создает копии приказов.
+
+Если approved outline уже утвержден и сохранен в `input\workflow\outline overrides\<номер темы>.md`, тогда запускать:
+
+```powershell
+python .\notary_agent.py prepare-main-theme "Тема 16. Особенности совершения отдельных видов нотариальных действий."
+```
+
+Команда создаст пакет в `input\output ready\...`, включая:
+
+- `00-context` — копии ключевых входных файлов;
+- `01-outline` — сгенерированное Оглавление;
+- `02-orders` — копии приказов по подтемам;
+- `03-packets` — execution packets по каждой подтеме;
+- `04-output\md` и `04-output\docx` — целевые папки для итоговых результатов.
+
+### 1a. Подготовить run-workspace по одной конечной подтеме
+
+После `prepare-main-theme` можно собрать staged workspace для конкретной конечной подтемы:
+
+```powershell
+python .\notary_agent.py run-subtopic 16.1.1
+```
+
+Команда создаст пакет в `input\output ready\...\05-runs\<subtopic_id>\<timestamp>\`, включая:
+
+- `00-context` — локальная копия обязательных входных файлов;
+- `01-stage-inputs` — вводный блок приказа и отдельные `part-01.md` ... `part-11.md`;
+- `02-stage-outputs` — stub-файлы под ответы по каждой Части;
+- `03-final` — локальный final-dir, `final.contract.json`, `final.skeleton.md` и `final.skeleton.docx`;
+- `04-web-plan` — web-first research pack для Части 2: `00-operator-sequence`, `message-01`, `message-02`, `message-03`, `queries`, `source-cascade`, `part-02.research-pack`, `part-02.core-template`, `part-02.launch-packet`, `research-log`, `evidence`;
+- `manifest.json` — статусы и режимы исполнения по всем 11 Частям.
+
+Если нужно явно указать основную тему, можно добавить `--theme-query`.
+
+`final.skeleton.md/.docx` фиксируют output contract до автоматизации Частей: ядро идет из Части 2, затем в финал последовательно встраиваются результаты Частей 3-11.
+
+Важно: финальный документ в этом проекте должен собираться максимально близко к прямому результату staged-взаимодействия с LLM. То есть цель агента не “переписать все заново красивее”, а получить качественные блоки по Частям и затем технически собрать их в принятый финальный `.md/.docx`.
+
+### Web-first план Части 2
+
+После `run-subtopic` агент теперь автоматически готовит `04-web-plan` для latest run-workspace.
+
+При необходимости его можно пересобрать отдельно:
+
+```powershell
+python .\notary_agent.py prepare-part-02-web 16.1.1 --force
+```
+
+Этот каталог нужен, чтобы Часть 2 не начиналась с ручного придумывания поисковых строк. Внутри лежат:
+
+- `queries.md/json` — стартовые запросы по подтеме;
+- `source-cascade.md/json` — приоритет URL1/URL2 и слоев источников;
+- `part-02.research-pack.md` — сводный web-first briefing по подтеме;
+- `part-02.core-template.md` — каркас финально-годного ядра Части 2;
+- `part-02.launch-packet.md` — один готовый пакет для вставки в LLM после `GO/СТАРТ`;
+- `00-operator-sequence.md` — короткая инструкция, что отправлять в LLM по шагам;
+- `message-01.part-01.md` — первое сообщение в LLM;
+- `message-02.go.txt` — второе сообщение в LLM, содержит только `GO/СТАРТ`;
+- `message-03.part-02-launch-packet.md` — третье сообщение в LLM;
+- `research-log.jsonl` и `evidence\` — место под журнал поиска и доказательства.
+
+### 1b. Автоматически выполнить Часть 1
+
+```powershell
+python .\notary_agent.py execute-part-01 16.1.1
+```
+
+Команда кладет в latest run готовый ответ по Части 1 и переводит статус `part-01` в `completed_waiting_for_go`.
+
+### 1c. Собрать финал из staged output-блоков
+
+```powershell
+python .\notary_agent.py assemble-subtopic-final 16.1.1
+```
+
+Сборщик:
+
+- берет Part 2 как обязательное ядро;
+- затем добавляет реальные результаты Частей 3-11 в хронологическом порядке;
+- не собирает финал, если `part-02` еще пустая/stub;
+- при `--publish` пишет результат и в канонические `04-output\md` и `04-output\docx`, но только когда все нужные части уже не stub.
+
+### 1d. Захватить готовый ответ LLM по Части
+
+Если вы получили готовый блок в окне LLM и хотите сразу положить его в latest run-workspace:
+
+```powershell
+python .\notary_agent.py capture-part-output 16.1.1 2 --source-file ".\part-02.md"
+```
+
+или напрямую из буфера обмена:
+
+```powershell
+python .\notary_agent.py capture-part-output 16.1.1 2 --clipboard
+```
+
+Для Части 2 команда:
+
+- валидирует базовую структуру ядра (`ТЕМА`, `АНАЛИЗ ОБЛАСТИ ПРАВА`, `A`, `B`, `КАРАНТИН`, `FAIL-SAFE CHECK`);
+- проверяет, что URL-подобные токены не висят вне code-блоков;
+- сохраняет результат в `02-stage-outputs\part-02.md`;
+- автоматически пересобирает `03-final\final.assembled.md/.docx`, чтобы ядро финального документа сразу обновилось.
+
+### 2. Старый `md-first` импорт и запуск через API
+
+1. Скопируйте `config.example.json` в `config.json` и при необходимости поправьте модель.
+2. Установите переменную окружения `OPENAI_API_KEY`.
+3. Импортируйте одну тему:
+
+```powershell
+python .\notary_agent.py import-topic "C:\Users\koper\Downloads\Dinka\Темы\Тема 15. Наследственное право в нотариальной практике\15.11.10. Наследование имущества, предоставленного наследодателю государством или муниципальным образованием на льготных условиях"
+```
+
+4. Приведите `orders\clean\*.md` в порядок: удалите лишние абзацы, следы старых диалогов и повторяющиеся команды. Сырые версии останутся в `orders\raw\`.
+
+5. Проверьте собранный запрос без сети:
+
+```powershell
+python .\notary_agent.py run-topic ".\imports\15.11.10" --config ".\config.json" --dry-run
+```
+
+6. После проверки выполните реальный запуск:
+
+```powershell
+python .\notary_agent.py run-topic ".\imports\15.11.10" --config ".\config.json"
+```
+
+## Структура импортированной темы
+
+```text
+imports/
+  15.11.10/
+    topic.md
+    master-prompt.md
+    orders/
+      raw/
+        part-01.md
+      clean/
+        part-01.md
+    assets/
+      template.docx
+    source-notes/
+      ...
+    manifest.json
+```
+
+## Команды
+
+- `draft-main-theme-outline` — подготовить только draft/review пакет Оглавления по основной теме.
+- `prepare-main-theme` — собрать рабочий пакет по основной теме из `Утверждаю.md`.
+- `run-subtopic` — подготовить staged run-workspace по одной конечной подтеме.
+- `execute-part-01` — автоматически сгенерировать ответ по Части 1 в latest run-workspace.
+- `capture-part-output` — принять готовый ответ LLM по нужной Части из файла или clipboard.
+- `prepare-part-02-web` — подготовить или пересобрать web-first research pack по Части 2 в latest run-workspace.
+- `assemble-subtopic-final` — собрать финальный `.md/.docx` из staged output-блоков latest run-workspace.
+- `init-workspace` — создает базовые папки проекта.
+- `import-topic` — импортирует одну папку темы в `md-first` формат и раскладывает приказ на `raw/clean`.
+- `import-tree` — рекурсивно импортирует все найденные подпапки тем.
+- `run-topic` — выполняет одну тему.
+- `batch-run` — последовательно выполняет все импортированные темы.
+
+## Почему `md-first`
+
+- Word старого формата `.doc` плохо автоматизируется;
+- `md` проще читать, искать, делить на части и отдельно чистить от лишних абзацев;
+- `docx` лучше оставить финальным контейнером для выгрузки результата.
