@@ -87,7 +87,7 @@ python .\notary_agent.py run-subtopic 16.1.1
 - `01-stage-inputs` — вводный блок приказа и отдельные `part-01.md` ... `part-11.md`;
 - `02-stage-outputs` — stub-файлы под ответы по каждой Части;
 - `03-final` — локальный final-dir, `final.contract.json`, `final.skeleton.md` и `final.skeleton.docx`;
-- `04-web-plan` — web-first, literal-context, reasoning-layer, semantic-dedup и omission-audit слой: `00-operator-sequence`, `message-01`, `message-02`, `message-03`, `queries`, `source-cascade`, `part-02.research-pack`, `part-02.core-template`, `part-02.launch-packet`, `research-log`, `evidence`, `follow-up-parts`, `reasoning-layer`, `semantic-dedup`, `omission-audit`;
+- `04-web-plan` — web-first, literal-context и reasoning-layer слой: `00-operator-sequence`, `message-01`, `message-02`, `message-03`, `queries`, `source-cascade`, `part-02.research-pack`, `part-02.core-template`, `part-02.launch-packet`, `research-log`, `evidence`, `follow-up-parts`, `reasoning-layer`;
 - `manifest.json` — статусы и режимы исполнения по всем 11 Частям.
 
 Если нужно явно указать основную тему, можно добавить `--theme-query`.
@@ -99,8 +99,10 @@ python .\notary_agent.py run-subtopic 16.1.1
 Актуальный стандарт финальной сборки:
 - в итоговом файле публикуются явные заголовки `ЧАСТЬ 2` ... `ЧАСТЬ 11`;
 - карточки документов внутри карточечных разделов нумеруются;
-- в `.md` ссылки сохраняются внутри fenced code blocks;
-- в `.docx` markdown-маркеры code blocks не печатаются, а сами ссылки показываются как визуальный моноширинный блок;
+- в итоговом `.md` ссылки публикуются в эталонном читабельном виде (`URL1`, `URL2`, `VERIFIED URL2`, `Заголовок страницы URL2`, `Сверка реквизитов`), а не загоняются принудительно в fenced code blocks;
+- в `.docx` те же поля выводятся как структурированный моноширинный блок без markdown-маркеров;
+- любой названный документ обязан иметь карточку с полным наименованием, структурным элементом и ссылочным блоком;
+- поиск по органам власти выводит карточки документов, а не групповые строки `Прямой документ(ы): ...`;
 - канонические имена итоговых файлов строятся как `номер подтемы + усеченный заголовок`.
 
 ### Web-first план Части 2
@@ -126,8 +128,6 @@ python .\notary_agent.py prepare-part-02-web 16.1.1 --force
 - `message-03.part-02-launch-packet.md` — третье сообщение в LLM;
 - `research-log.jsonl` и `evidence\` — место под журнал поиска и доказательства;
 - `reasoning-layer\part-02.reasoning.md` ... `part-11.reasoning.md` — reasoning-briefs по всему циклу Частей `2–11`.
-- `semantic-dedup\semantic-dedup.snapshot.json` и `part-05.semantic-dedup.md` ... `part-08.semantic-dedup.md` — смысловой дедуп по ролям документов для фильтров и anti-repeat слоя.
-- `omission-audit\omission-audit.snapshot.json` и `part-09.omission-audit.md` ... `part-11.omission-audit.md` — второй проход на пропуски и слабые места покрытия перед финальными доборами, конспектом и заданиями.
 
 Новый baseline усиления:
 
@@ -135,8 +135,8 @@ python .\notary_agent.py prepare-part-02-web 16.1.1 --force
 - после захвата каждой Части агент пересобирает динамические пакеты, чтобы следующая Часть видела уже накопленный контекст этой же подтемы;
 - для Частей `6–11` создаются `04-web-plan\follow-up-parts\message.part-06.md` ... `message.part-11.md`, чтобы follow-up этапы не стартовали с “сырых” stage-inputs без памяти о предыдущих ответах;
 - для Частей `2–11` создается `04-web-plan\reasoning-layer`, чтобы каждая стадия получала не только инструкцию Приказа, но и отдельный reasoning contract: как искать, что считать новой дельтой, где типичные пропуски и какие ошибки запрещены;
-- для Частей `5–8` создается `04-web-plan\semantic-dedup`, чтобы один и тот же документ не дублировался механически, если он уже найден в той же роли, но сохранялся при новой смысловой роли;
-- для Частей `9–11` создается `04-web-plan\omission-audit`, чтобы второй проход на пропуски шел по snapshot текущего покрытия, а не по памяти исполнителя.
+- reasoning-layer теперь усиливает `Части 6–9` как свежие повторные поисковые проходы и не подменяет их сухим anti-repeat ответом;
+- `Часть 10` обязана давать после каждого пункта копируемые code-блоки с полным наименованием документа и структурным элементом, а `Часть 11` — строго держаться формулировки Приказа: только 4-я колонка дневника и только перечень выполненных стажером действий без перечисления документов.
 
 ### 1b. Автоматически выполнить Часть 1
 

@@ -52,6 +52,8 @@ FOLLOWUP_LITERAL_PART_NUMBERS = (6, 7, 8, 9, 10, 11)
 REASONING_LAYER_PART_NUMBERS = tuple(range(2, 12))
 OMISSION_AUDIT_PART_NUMBERS = (9, 10, 11)
 SEMANTIC_DEDUP_PART_NUMBERS = (5, 6, 7, 8)
+PRODUCTION_ENABLE_SEMANTIC_DEDUP = False
+PRODUCTION_ENABLE_OMISSION_AUDIT = False
 
 REASONING_LAYER_GUIDANCE = {
     2: {
@@ -59,12 +61,14 @@ REASONING_LAYER_GUIDANCE = {
         "moves": [
             "Сначала декомпозировать подтему на объект, действие нотариуса, участников, процедуру, деньги, ограничения, электронный и международный слой.",
             "Строить не только прямые, но и скрытые гипотезы поиска: кодексный, профильный, подзаконный, ведомственный, ФНП, судебный, международный.",
+            "Обязательно искать редакционную цепочку и свежие акты, которые меняют базовые приказы или профильные документы по теме.",
             "По каждому документу различать роль: прямоприменимый, опорный, карантинный или fail-safe фактор.",
             "Не ограничиваться стартовыми query-подсказками, если смысл темы требует расширения поиска.",
             "Решение о включении документа принимать по существованию, применимости, роли в теме и подтвержденному URL1; URL2 усиливает карточку, но сам по себе не решает вопрос включения.",
         ],
         "risks": [
             "Потеря скрытого слоя темы из-за слишком раннего выбора 1-2 базовых актов.",
+            "Потеря свежих приказов об изменениях и редакционных цепочек к уже найденным актам.",
             "Смешение substantive и tariff подтем в одном ответе.",
             "Формальный вывод документа без реальной роли в теме.",
         ],
@@ -116,11 +120,13 @@ REASONING_LAYER_GUIDANCE = {
         "moves": [
             "Смотреть на документ как на носитель роли: ядро, смежный слой, контрольный слой, международный слой, электронный слой.",
             "Отбрасывать повторы и слабые кандидаты, но оставлять документы, закрывающие самостоятельный юридический риск.",
+            "Сначала делать дополнительный внешний поиск и только потом фильтровать уже найденное; не превращать Часть 6 в короткую отписку без повторного прохода.",
             "После фильтрации перепроверять, не появился ли новый пробел по обязательному узлу темы.",
         ],
         "risks": [
             "Слишком агрессивная фильтрация с потерей полезных документов.",
             "Слабый документ оставлен только потому, что найден позже других.",
+            "Ответ `новых документов не выявлено` без реального повторного web-search по узлам темы.",
             "Фильтр без повторной проверки на пробелы.",
         ],
     },
@@ -129,11 +135,13 @@ REASONING_LAYER_GUIDANCE = {
         "moves": [
             "Считать новым только документ, который дает новый нормативный слой, новый орган, новый режим или новый структурный элемент.",
             "Не принимать за 'новый' тот же акт в другой редакции или на другой площадке без новой смысловой функции.",
+            "Перед выводом обязательно делать свежий web-search по редакционным цепочкам, изменениям и свежим публикациям, а не только пересматривать уже собранный массив.",
             "Проверять, закрывает ли документ ранее незакрытый риск или узел темы.",
         ],
         "risks": [
             "Добавление псевдо-новых документов ради количества.",
             "Подмена новых документов новыми ссылками на старые акты.",
+            "Формальное `новых документов не выявлено` без повторного внешнего поиска.",
             "Потеря точечной, но ценной нормы из-за слишком грубого дедупа.",
         ],
     },
@@ -142,10 +150,12 @@ REASONING_LAYER_GUIDANCE = {
         "moves": [
             "Сверять каждый федеральный кандидат с уже подтвержденной федеральной базой по роли, реквизитам и структурному элементу.",
             "Оставлять только те федеральные документы, которые реально расширяют покрытие темы.",
+            "Обязательно искать новые федеральные акты и акты об изменениях к уже найденным документам, если они влияют на актуальную редакцию.",
             "Если найден новый структурный элемент в уже известном федеральном акте, фиксировать это как дельту, а не как новый акт.",
         ],
         "risks": [
             "Повтор федеральной базы под видом дельты.",
+            "Потеря свежих федеральных приказов об изменениях к базовым актам.",
             "Потеря нового структурного элемента внутри уже известного акта.",
             "Смешение федеральной дельты с региональными или методическими источниками.",
         ],
@@ -155,6 +165,7 @@ REASONING_LAYER_GUIDANCE = {
         "moves": [
             "Искать подозрительно пустые узлы темы, особенно после фильтрации и дедупликации.",
             "Сверять обязательные блоки, органы и слои с уже собранным ядром.",
+            "Перед выводом делать повторный внешний поиск по слепым зонам, а не только логический пересмотр уже записанного массива.",
             "Фиксировать не только новые документы, но и структурные дыры, слабые верификации и сомнительные карантинные зоны.",
             "Использовать аудит как проверку полноты, а не как формальное повторение списка документов.",
         ],
@@ -169,11 +180,12 @@ REASONING_LAYER_GUIDANCE = {
         "moves": [
             "Выделять только ключевые нормы, режимы, риски и опорные документы, которые реально управляют темой.",
             "Показывать связи между ядром, смежными слоями, отказами, ограничениями и практическими последствиями.",
-            "Сжимать материал до полезного прикладного конспекта, а не до формального реферата.",
+            "Сжимать материал до полезного прикладного конспекта, но не высушивать его: каждый тезис должен быть оперт на именованные документы с карточками и ссылками.",
         ],
         "risks": [
             "Повтор всего документа вместо конспекта.",
             "Добавление непроверенных выводов, которых не было в собранной базе.",
+            "Сухой narrative без полноценных карточек документов-опор.",
             "Потеря практических рисков и ограничений.",
         ],
     },
@@ -182,11 +194,13 @@ REASONING_LAYER_GUIDANCE = {
         "moves": [
             "Выводить задания из подтвержденных документов, процедур, ограничений, отказов, проверок и международных режимов темы.",
             "Давать задания прикладные, проверяемые и привязанные к найденным актам и структурным элементам.",
+            "Формулировать перечень как записи для 4-й колонки дневника о выполненных стажером действиях по характеру задания.",
             "Не генерировать учебный шум, если его нельзя опереть на уже собранную базу.",
         ],
         "risks": [
             "Абстрактные задания без опоры на документы темы.",
             "Повтор мини-конспекта вместо практических задач.",
+            "Императивные формулировки и уход в другие колонки дневника вместо перечня выполненных стажером действий.",
             "Уход в смежные темы, не подтвержденные текущей базой.",
         ],
     },
@@ -212,6 +226,14 @@ FINAL_PART_TITLES = {
     9: "ДЕЛЬТА-АУДИТ",
     10: "РАСШИРЕННЫЙ МИНИ-КОНСПЕКТ",
     11: "ПЕРЕЧЕНЬ ПРАКТИЧЕСКИХ ЗАДАНИЙ ПО ЗАДАННОЙ ТЕМЕ",
+}
+
+FRESH_RUN_TRUSTED_SOURCE_ORIGINS = {
+    "execute_part_01",
+    "capture_part_output",
+    "capture_part_03_range",
+    "capture_part_04_range",
+    "capture_part_05_range",
 }
 
 PROMINENT_INNER_HEADINGS = {
@@ -1467,6 +1489,20 @@ def build_part_02_queries(run_workspace: SubtopicRunWorkspace) -> list[dict[str,
             ["minjust.gov.ru", "notariat.ru", "consultant.ru", "garant.ru"],
             "Проверить формы, реестровый, делопроизводственный и учетный слой.",
         )
+        add_query(
+            "q10",
+            "amendment_chain",
+            f"\"{query_focus}\" приказ Минюста изменения 2024 2025 156 226 224 225",
+            ["publication.pravo.gov.ru", "rg.ru", "consultant.ru", "garant.ru"],
+            "Добрать редакционную цепочку и свежие приказы об изменениях к базовым приказам Минюста.",
+        )
+        add_query(
+            "q11",
+            "latest_official_updates",
+            f"\"{query_focus}\" актуальная редакция приказ Минюста нотариат 2025",
+            ["publication.pravo.gov.ru", "pravo.gov.ru", "rg.ru", "consultant.ru", "garant.ru"],
+            "Проверить свежие официально опубликованные обновления и редакции по теме.",
+        )
 
     return dedupe_queries(queries)
 
@@ -1553,7 +1589,7 @@ def build_part_02_research_pack(run_workspace: SubtopicRunWorkspace) -> str:
             "## Жесткие ограничения Part 02",
             "",
             "- Part 02 должен сразу давать финально-годное ядро документа.",
-            "- Ссылки, идентификаторы ресурсов и канонические строки URL1/URL2 допустимы только внутри fenced code blocks.",
+            "- Если документ назван в `АНАЛИЗ-КОДЕКСЫ И БАЗОВЫЕ АКТЫ`, `A`, `B`, `КАРАНТИН` или `FAIL-SAFE CHECK`, у него должны быть полное официальное наименование, структурный элемент, URL1 и статус URL2.",
             "- Сначала анализ области права и кодексов, только потом A/B/КАРАНТИН/FAIL-SAFE CHECK.",
             "- Публичная обработка блоков I-XXXVII, статусы `НАЙДЕНО/НЕ ВЫЯВЛЕНО` и любые диапазоны блоков в Part 02 запрещены: это относится к Части 3.",
             "- Внутренняя маркировка применимости блоков допустима только как внутренняя работа исполнителя и не должна появляться в публичном тексте Part 02.",
@@ -1586,19 +1622,19 @@ def build_part_02_core_template(run_workspace: SubtopicRunWorkspace) -> str:
         "[Сначала квалифицировать юридическую природу нотариального действия, участников, объект удостоверения/проверки, процедурный, подзаконный и контрольный слои.]",
         "",
         "АНАЛИЗ-КОДЕКСЫ И БАЗОВЫЕ АКТЫ",
-        "[Указать применимые кодексы и базовые акты со структурными элементами, не переходя к карточкам документов раньше времени.]",
+        "[Каждый названный здесь акт должен идти как отдельный нумерованный мини-блок: полное официальное наименование, структурный элемент, URL1, URL2, VERIFIED URL2, Заголовок страницы URL2, Сверка реквизитов.]",
         "",
         "A. РЕГУЛЯТОРНОЕ ЯДРО",
-        "[Сюда включаются только подтвержденные прямо применимые документы с карточками, URL1/URL2 в fenced code blocks и структурным элементом.]",
+        "[Сюда включаются только подтвержденные прямо применимые документы с полноценными карточками: Вид документа, Полное наименование, Орган, Структурный элемент, Значение для темы, URL1, URL2, VERIFIED URL2, Заголовок страницы URL2, Сверка реквизитов, Каноническая строка поиска.]",
         "",
         "B. ОПОРНЫЕ ДОКУМЕНТЫ",
-        "[Сюда включаются дополнительные профильные документы, которые поддерживают обоснование темы.]",
+        "[Сюда включаются дополнительные профильные документы в том же карточном формате.]",
         "",
         "КАРАНТИН",
-        "[Сюда попадают документы с неподтвержденным URL2, структурным элементом или статусом.]",
+        "[Сюда попадают только документы с материальной неопределенностью по самому документу, его действию, применимости или структурному элементу; даже здесь обязательны полное наименование, структурный элемент, URL1, статус URL2 и причина карантина.]",
         "",
         "FAIL-SAFE CHECK",
-        "[Отдельно перечислить слепые зоны и прямо отметить, какие применимые слои были проверены и что по ним найдено/не найдено.]",
+        "[Отдельно перечислить слепые зоны; если называются конкретные акты, у них тоже должны быть наименование, структурный элемент и ссылки.]",
         "",
         "## Внутренние заметки для исполнителя",
         "",
@@ -1722,10 +1758,12 @@ def build_part_02_launch_packet(run_workspace: SubtopicRunWorkspace) -> str:
         f"- Первая строка: `ТЕМА: {focus['subtopic_line']}`",
         "- Вернуть только финально-годный ответ по Части 2.",
         "- Сохранить жесткий порядок блоков и не добавлять лишние разделы раньше времени.",
-        "- Все URL, домены и ссылочные идентификаторы писать только внутри fenced code blocks.",
+        "- В пользовательском ответе оформлять ссылки и верификацию по эталонному режиму: `URL1`, `URL2`, `VERIFIED URL2`, `Заголовок страницы URL2 (как на странице)`, `Сверка реквизитов`, `Каноническая строка поиска`.",
+        "- Каждый акт, названный в `АНАЛИЗ-КОДЕКСЫ И БАЗОВЫЕ АКТЫ`, должен сопровождаться отдельным мини-блоком с полным официальным наименованием, структурным элементом и ссылками.",
         "- Если документ подтвержден по существованию, применимости, роли и URL1, он не должен теряться из-за слабого URL2: оставлять его в `A` или `B` по роли и явно помечать статус `VERIFIED URL2` и сверку реквизитов.",
         "- В `КАРАНТИН` переносить документ только при реальном сомнении в существовании, действии, точной идентификации, применимости или структурном элементе.",
         "- Режим `URL2: отсутствует (КАРАНТИН)` относится к полю `URL2` внутри карточки и сам по себе не означает перенос документа в раздел `КАРАНТИН`.",
+        "- В `Части 4` и других follow-up частях запрещен формат `Прямой документ(ы): ...` со сваленными ссылками: каждый найденный документ должен иметь собственную карточку.",
         "- Не публиковать в Part 2 блоки I-XXXVII, статусы `НАЙДЕНО/НЕ ВЫЯВЛЕНО`, диапазоны блоков и иные результаты обработки СФЕРЫ ПОИСКА: это отдельная Часть 3.",
         "- Внутренняя маркировка применимости блоков допустима только внутри размышления исполнителя и не должна попадать в финальный текст ответа по Части 2.",
         "",
@@ -1967,6 +2005,38 @@ def collect_manifest_part_statuses(run_workspace: SubtopicRunWorkspace) -> dict[
     for item in manifest.get("parts", []):
         statuses[int(item.get("part_number", 0))] = str(item.get("status", ""))
     return statuses
+
+
+def collect_manifest_part_metadata(run_workspace: SubtopicRunWorkspace) -> dict[int, dict[str, Any]]:
+    manifest_path = run_workspace.run_dir / "manifest.json"
+    manifest = load_json_if_exists(manifest_path)
+    if not manifest:
+        return {}
+    metadata: dict[int, dict[str, Any]] = {}
+    for item in manifest.get("parts", []):
+        part_number = int(item.get("part_number", 0))
+        if part_number:
+            metadata[part_number] = item
+    return metadata
+
+
+def collect_untrusted_output_parts(
+    run_workspace: SubtopicRunWorkspace, included_parts: list[int]
+) -> list[dict[str, Any]]:
+    metadata = collect_manifest_part_metadata(run_workspace)
+    issues: list[dict[str, Any]] = []
+    for part_number in included_parts:
+        part_meta = metadata.get(part_number, {})
+        source_origin = str(part_meta.get("source_origin", "")).strip()
+        if source_origin not in FRESH_RUN_TRUSTED_SOURCE_ORIGINS:
+            issues.append(
+                {
+                    "part_number": part_number,
+                    "source_origin": source_origin or "unknown",
+                    "status": str(part_meta.get("status", "")),
+                }
+            )
+    return issues
 
 
 def collect_present_parts(run_workspace: SubtopicRunWorkspace, max_part_number: int) -> list[int]:
@@ -2548,20 +2618,32 @@ def write_semantic_dedup_layer(run_workspace: SubtopicRunWorkspace, overwrite: b
     return paths
 
 
+def build_followup_part_boosters(part_number: int) -> list[str]:
+    if part_number in {6, 7, 8, 9}:
+        return [
+            "Эта Часть обязана делать новый внешний web-search по своим узлам, а не только пересказывать уже собранный массив.",
+            "Ответ `новых документов не выявлено` допустим только после повторного внешнего прохода по официальным источникам, редакционным цепочкам и свежим изменениям.",
+            "Если найден новый акт или новый релевантный акт об изменениях, он должен быть оформлен полной карточкой документа, а не коротким упоминанием.",
+            "Не сушить выдачу: если документ реально усиливает тему, его нужно оставить даже при пересечении с уже найденным корпусом.",
+        ]
+    if part_number == 10:
+        return [
+            "Мини-конспект должен быть насыщенным и прикладным, а не сухим narrative-текстом.",
+            "После каждого пункта мини-конспекта нужно давать копируемые ссылки в code-блоках с полным наименованием документа и структурным элементом для подтверждения содержания этого пункта.",
+            "Нумеровать только пункты; строки текста внутри пункта не нумеровать.",
+        ]
+    if part_number == 11:
+        return [
+            "Документы перечислять не надо: они уже были даны в предыдущих Частях.",
+            "Нужно писать только для 4-й колонки дневника как перечень выполненных стажером действий по характеру задания.",
+        ]
+    return []
+
+
 def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number: int) -> str:
     part = get_order_part(run_workspace, part_number)
     literal_context_md = build_literal_context_bundle(run_workspace, part_number)
     reasoning_brief_md = build_reasoning_part_brief(run_workspace, part_number)
-    semantic_dedup_md = (
-        build_semantic_dedup_brief(run_workspace, part_number)
-        if part_number in SEMANTIC_DEDUP_PART_NUMBERS
-        else ""
-    )
-    omission_audit_md = (
-        build_omission_audit_brief(run_workspace, part_number)
-        if part_number in OMISSION_AUDIT_PART_NUMBERS
-        else ""
-    )
     title = FINAL_PART_TITLES.get(part_number, f"ЧАСТЬ {part_number}")
     lines = [
         f"# Part {part_number:02d} Continuation Packet: {run_workspace.subtopic_entry.line}",
@@ -2569,14 +2651,30 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
         "Режим: максимально буквальное продолжение той же LLM-сессии по этой подтеме.",
         "- Не перезапускать Части 1–5 и не возвращаться к `ТЕМА/АНАЛИЗ`, если текущая Часть этого не требует.",
         "- Не ослаблять охват: использовать уже найденный материал как опору и дожимать именно текущую Часть.",
-        "- Все ссылки, URL, домены и якоря держать только внутри fenced code blocks.",
         "",
     ]
+    if part_number == 11:
+        lines.insert(
+            5,
+            "- Для Части 11 документы не перечислять; нужен только перечень выполненных стажером действий для 4-й колонки дневника по характеру задания.",
+        )
+    elif part_number == 10:
+        lines.insert(
+            5,
+            "- Для Части 10 после каждого пункта давать копируемые ссылочные code-блоки с полным наименованием документа и структурным элементом.",
+        )
+    else:
+        lines.insert(
+            5,
+            "- Все найденные документы оформлять карточками с `Вид документа`, `Полное наименование`, `Структурный элемент`, `URL1`, `URL2`, `VERIFIED URL2`, `Заголовок страницы URL2`, `Сверка реквизитов` и `Каноническая строка поиска` по мере применимости.",
+        )
     lines.extend([reasoning_brief_md, ""])
-    if semantic_dedup_md:
-        lines.extend([semantic_dedup_md, ""])
-    if omission_audit_md:
-        lines.extend([omission_audit_md, ""])
+    boosters = build_followup_part_boosters(part_number)
+    if boosters:
+        lines.extend(["## Усилители текущей Части", ""])
+        for item in boosters:
+            lines.append(f"- {item}")
+        lines.append("")
     if literal_context_md:
         lines.extend([literal_context_md, ""])
     lines.extend(
@@ -2612,7 +2710,7 @@ def build_followup_part_packets_readme(run_workspace: SubtopicRunWorkspace) -> s
     lines = [
         f"# Follow-up Part Packets: {run_workspace.subtopic_entry.line}",
         "",
-        "Эти файлы нужны для Частей 6–11. В отличие от сырых stage-inputs они включают живой контекст уже завершенных частей этой же подтемы.",
+        "Эти файлы нужны для Частей 6–11. В отличие от сырых stage-inputs они включают живой контекст уже завершенных частей этой же подтемы и прямые усилители против пересушки выдачи.",
         "",
     ]
     for part_number in FOLLOWUP_LITERAL_PART_NUMBERS:
@@ -2646,25 +2744,27 @@ def refresh_dynamic_part_packets(run_workspace: SubtopicRunWorkspace) -> None:
             build_reasoning_part_brief(run_workspace, part_number, heading_level="#"),
         )
 
-    semantic_dedup_paths = build_semantic_dedup_paths(run_workspace)
-    semantic_dedup_paths["dedup_dir"].mkdir(parents=True, exist_ok=True)
-    write_text(semantic_dedup_paths["readme"], build_semantic_dedup_readme(run_workspace))
-    write_json(semantic_dedup_paths["snapshot_json"], build_semantic_dedup_snapshot(run_workspace))
-    for part_number in SEMANTIC_DEDUP_PART_NUMBERS:
-        write_text(
-            semantic_dedup_paths["brief_files"][part_number],
-            build_semantic_dedup_brief(run_workspace, part_number),
-        )
+    if PRODUCTION_ENABLE_SEMANTIC_DEDUP:
+        semantic_dedup_paths = build_semantic_dedup_paths(run_workspace)
+        semantic_dedup_paths["dedup_dir"].mkdir(parents=True, exist_ok=True)
+        write_text(semantic_dedup_paths["readme"], build_semantic_dedup_readme(run_workspace))
+        write_json(semantic_dedup_paths["snapshot_json"], build_semantic_dedup_snapshot(run_workspace))
+        for part_number in SEMANTIC_DEDUP_PART_NUMBERS:
+            write_text(
+                semantic_dedup_paths["brief_files"][part_number],
+                build_semantic_dedup_brief(run_workspace, part_number),
+            )
 
-    omission_paths = build_omission_audit_paths(run_workspace)
-    omission_paths["audit_dir"].mkdir(parents=True, exist_ok=True)
-    write_text(omission_paths["readme"], build_omission_audit_readme(run_workspace))
-    write_json(omission_paths["snapshot_json"], build_omission_audit_snapshot(run_workspace))
-    for part_number in OMISSION_AUDIT_PART_NUMBERS:
-        write_text(
-            omission_paths["brief_files"][part_number],
-            build_omission_audit_brief(run_workspace, part_number),
-        )
+    if PRODUCTION_ENABLE_OMISSION_AUDIT:
+        omission_paths = build_omission_audit_paths(run_workspace)
+        omission_paths["audit_dir"].mkdir(parents=True, exist_ok=True)
+        write_text(omission_paths["readme"], build_omission_audit_readme(run_workspace))
+        write_json(omission_paths["snapshot_json"], build_omission_audit_snapshot(run_workspace))
+        for part_number in OMISSION_AUDIT_PART_NUMBERS:
+            write_text(
+                omission_paths["brief_files"][part_number],
+                build_omission_audit_brief(run_workspace, part_number),
+            )
 
     part_02_paths = build_part_02_web_plan_paths(run_workspace)
     write_text(part_02_paths["launch_packet"], build_part_02_launch_packet(run_workspace))
@@ -2812,6 +2912,22 @@ def update_run_manifest_semantic_dedup(run_workspace: SubtopicRunWorkspace, dedu
     write_json(manifest_path, manifest)
 
 
+def drop_disabled_manifest_layers(run_workspace: SubtopicRunWorkspace) -> None:
+    manifest_path = run_workspace.run_dir / "manifest.json"
+    if not manifest_path.exists():
+        return
+    manifest = json.loads(read_text(manifest_path))
+    changed = False
+    if not PRODUCTION_ENABLE_SEMANTIC_DEDUP and "semantic_dedup" in manifest:
+        manifest.pop("semantic_dedup", None)
+        changed = True
+    if not PRODUCTION_ENABLE_OMISSION_AUDIT and "omission_audit" in manifest:
+        manifest.pop("omission_audit", None)
+        changed = True
+    if changed:
+        write_json(manifest_path, manifest)
+
+
 def build_part_03_plan_paths(run_workspace: SubtopicRunWorkspace) -> dict[str, Any]:
     plan_dir = run_workspace.web_plan_dir / "part-03"
     message_files = {
@@ -2877,7 +2993,7 @@ def build_part_03_operator_sequence(run_workspace: SubtopicRunWorkspace) -> str:
         "",
         "- Не начинать заново с `ТЕМА:` или `АНАЛИЗ ОБЛАСТИ ПРАВА`.",
         "- Не добавлять `A. РЕГУЛЯТОРНОЕ ЯДРО` и `B. ОПОРНЫЕ ДОКУМЕНТЫ`.",
-        "- Все URL и ссылочные идентификаторы держать только внутри fenced code blocks.",
+        "- Для каждого найденного документа давать собственную карточку с полным наименованием, структурным элементом и ссылками; не сваливать документы в одну строку под подпунктом.",
         "- Один ответ = один диапазон блоков. Самостоятельный переход к следующему диапазону запрещен.",
         "",
     ]
@@ -2902,7 +3018,7 @@ def build_part_03_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
         f"- Обработать только блоки `{segment['label']}`.",
         "- Использовать исходную нумерацию и формулировки блоков I–XXXVII.",
         "- После каждого блока дать найдено/не выявлено и документы строго после соответствующего блока.",
-        "- Все URL, домены и идентификаторы ресурсов держать только внутри fenced code blocks.",
+        "- Для каждого найденного документа указывать конкретные документы и ссылки рядом с ними; не сваливать ссылки общим блоком без привязки к названию акта.",
         "",
         "Канонические блоки этого диапазона:",
         "",
@@ -3006,8 +3122,6 @@ def build_subtopic_run_readme(run_workspace: SubtopicRunWorkspace) -> str:
         "",
         "- `04-web-plan` хранит research pack, поисковые запросы, source cascade, research log и evidence.",
         "- `04-web-plan/reasoning-layer` хранит reasoning-briefs по Частям 2–11 и усиливает интеллектуальный режим всего цикла.",
-        "- `04-web-plan/semantic-dedup` хранит смысловую карту повторов документов по ролям для Частей 5–8.",
-        "- `04-web-plan/omission-audit` хранит второй проход на пропуски для Частей 9–11 и подсветку слабых мест покрытия.",
         "- Этот слой нужен, чтобы агент или LLM не придумывали поисковые строки заново перед каждым прогоном.",
         "- `04-web-plan/follow-up-parts` хранит буквальные continuation-пакеты для Частей 6–11 с уже накопленным контекстом предыдущих частей.",
         "- `04-web-plan/part-03` хранит сегментированный операторский план для Части 3 по диапазонам I–XXXVII.",
@@ -3021,7 +3135,7 @@ def build_final_output_contract(run_workspace: SubtopicRunWorkspace) -> dict[str
         "theme_title": run_workspace.theme_workspace.theme.full_title,
         "subtopic_id": run_workspace.subtopic_entry.item_id,
         "subtopic_line": run_workspace.subtopic_entry.line,
-        "assembly_policy": "direct_llm_output_with_minimal_postprocessing",
+        "assembly_policy": "etalon_publication_format_with_document_cards",
         "accepted_example_md": str(run_workspace.theme_workspace.paths["output_example_md"]),
         "accepted_example_docx": str(run_workspace.theme_workspace.paths["output_example_docx"]),
         "canonical_final_md_target": str(run_workspace.final_md_target),
@@ -3298,8 +3412,7 @@ def find_link_like_tokens_outside_code_blocks(text: str) -> list[str]:
 def normalize_part_output(part_number: int, text: str) -> str:
     normalized = text
     if part_number >= 2:
-        normalized = normalize_part_02_url_blocks(normalized)
-        normalized = normalize_loose_link_groups(normalized)
+        normalized = normalize_label_only_code_blocks(normalized)
     return normalized
 
 
@@ -3421,6 +3534,35 @@ def normalize_loose_link_groups(text: str) -> str:
     return normalized
 
 
+def extract_heading_section(text: str, start_heading: str, end_headings: list[str]) -> str:
+    lines = text.splitlines()
+    collecting = False
+    collected: list[str] = []
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not collecting:
+            if stripped == start_heading:
+                collecting = True
+            continue
+        if stripped in end_headings:
+            break
+        collected.append(raw_line)
+    return "\n".join(collected).strip()
+
+
+def has_structural_element_marker(text: str) -> bool:
+    return bool(re.search(r"(?im)^.*Структурн(?:ый элемент|ые элементы):", text))
+
+
+def has_document_card_markers(text: str) -> bool:
+    return "Вид документа:" in text and "Полное наименование:" in text and has_structural_element_marker(text)
+
+
+LIKELY_LEGAL_REFERENCE_RE = re.compile(
+    r"(?i)(федеральн(?:ый|ого)\s+закон|приказ|кодекс|основы законодательства|конвенц|постановлен(?:ие|ия)\s+пленума|консульский устав|методическ(?:ие|их)\s+рекомендац)"
+)
+
+
 def extract_part_31_subpoints(master_prompt_text: str) -> dict[int, str]:
     subpoints: dict[int, str] = {}
     in_section = False
@@ -3498,10 +3640,26 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
             issues.append("Part 2 must not contain the Part 1 stop line")
         if PART_02_FORBIDDEN_PUBLIC_BLOCKS_RE.search(stripped):
             issues.append("Part 2 must not publish block-by-block I-XXXVII coverage statuses; that belongs to Part 3")
-        external_links = find_link_like_tokens_outside_code_blocks(stripped)
-        if external_links:
-            preview = ", ".join(external_links[:5])
-            issues.append(f"Part 2 has link-like tokens outside code blocks: {preview}")
+        analysis_codes_block = extract_heading_section(
+            stripped,
+            "АНАЛИЗ-КОДЕКСЫ И БАЗОВЫЕ АКТЫ",
+            ["A. РЕГУЛЯТОРНОЕ ЯДРО"],
+        )
+        if analysis_codes_block:
+            if "URL1:" not in analysis_codes_block:
+                issues.append("Part 2 analysis/codes block must include URL1 lines for the named acts")
+            if not has_structural_element_marker(analysis_codes_block):
+                issues.append("Part 2 analysis/codes block must include structural elements for the named acts")
+        quarantine_block = extract_heading_section(
+            stripped,
+            "КАРАНТИН",
+            ["FAIL-SAFE CHECK"],
+        )
+        if quarantine_block and re.search(r"(?im)^\s*\d+[.)]?\s", quarantine_block):
+            if "URL1:" not in quarantine_block:
+                issues.append("Part 2 quarantine entries must include URL1")
+            if not has_structural_element_marker(quarantine_block):
+                issues.append("Part 2 quarantine entries must include a structural element marker")
 
     return issues
 
@@ -3554,10 +3712,6 @@ def validate_part_03_segment_output(text: str) -> list[str]:
         issues.append("Part 3 range output must not restart the Part 2 analysis blocks")
     if "A. РЕГУЛЯТОРНОЕ ЯДРО" in stripped or "B. ОПОРНЫЕ ДОКУМЕНТЫ" in stripped:
         issues.append("Part 3 range output must not reintroduce `A/B` sections from Part 2")
-    external_links = find_link_like_tokens_outside_code_blocks(stripped)
-    if external_links:
-        preview = ", ".join(external_links[:5])
-        issues.append(f"Part 3 range output has link-like tokens outside code blocks: {preview}")
     issues.extend(validate_part_03_canonical_structure(stripped))
     return issues
 
@@ -3619,10 +3773,12 @@ def validate_part_04_segment_output(text: str) -> list[str]:
         issues.append("Part 4 range output must not restart the Part 2 analysis blocks")
     if "A. РЕГУЛЯТОРНОЕ ЯДРО" in stripped or "B. ОПОРНЫЕ ДОКУМЕНТЫ" in stripped:
         issues.append("Part 4 range output must not reintroduce `A/B` sections from Part 2")
-    external_links = find_link_like_tokens_outside_code_blocks(stripped)
-    if external_links:
-        preview = ", ".join(external_links[:5])
-        issues.append(f"Part 4 range output has link-like tokens outside code blocks: {preview}")
+    if "Прямой документ:" in stripped or "Прямые документы:" in stripped:
+        issues.append("Part 4 range output must use full document cards instead of grouped `Прямой документ(ы)` lines")
+    if "Статус: НАЙДЕНО" in stripped and not has_document_card_markers(stripped):
+        issues.append("Part 4 range output with found documents must include `Вид документа`, `Полное наименование` and `Структурный элемент`")
+    if "Статус: НАЙДЕНО" in stripped and "URL1:" not in stripped:
+        issues.append("Part 4 range output with found documents must include URL1")
     return issues
 
 
@@ -3732,7 +3888,7 @@ def build_part_04_operator_sequence(run_workspace: SubtopicRunWorkspace) -> str:
         "",
         "- Не начинать заново с `ТЕМА:` или `АНАЛИЗ ОБЛАСТИ ПРАВА`.",
         "- Не добавлять `A. РЕГУЛЯТОРНОЕ ЯДРО` и `B. ОПОРНЫЕ ДОКУМЕНТЫ`.",
-        "- Все URL и ссылочные идентификаторы держать только внутри fenced code blocks.",
+        "- Каждый найденный документ оформлять собственной карточкой или явно привязанным мини-блоком со ссылками и структурным элементом.",
         "- Один ответ = один диапазон подпунктов. Самостоятельный переход к следующему диапазону запрещен.",
         "",
     ]
@@ -3759,7 +3915,8 @@ def build_part_04_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
         f"- Обработать только подпункты `{segment['label']}`.",
         "- Использовать исходную нумерацию и формулировки подпунктов 3.1 Дополнительного алгоритма охвата.",
         "- После каждого подпункта дать найдено/не выявлено и документы строго после соответствующего подпункта.",
-        "- Все URL, домены и идентификаторы ресурсов держать только внутри fenced code blocks.",
+        "- Если подпункт дает документы, выводить их только карточками: `Вид документа`, `Полное наименование`, `Орган`, `Структурный элемент`, `Подтверждение применимости`, `URL1`, `URL2`, `VERIFIED URL2`, `Заголовок страницы URL2`, `Сверка реквизитов`, `Каноническая строка поиска`.",
+        "- Запрещено писать `Прямой документ:` или `Прямые документы:` со списком названий и общей пачкой ссылок; ссылки должны быть привязаны к каждой карточке.",
         "",
     ]
     lines.extend([reasoning_brief_md, ""])
@@ -3855,10 +4012,6 @@ def validate_part_05_segment_output(text: str) -> list[str]:
         issues.append("Part 5 range output must not restart the Part 2 analysis blocks")
     if "A. РЕГУЛЯТОРНОЕ ЯДРО" in stripped or "B. ОПОРНЫЕ ДОКУМЕНТЫ" in stripped:
         issues.append("Part 5 range output must not reintroduce `A/B` sections from Part 2")
-    external_links = find_link_like_tokens_outside_code_blocks(stripped)
-    if external_links:
-        preview = ", ".join(external_links[:5])
-        issues.append(f"Part 5 range output has link-like tokens outside code blocks: {preview}")
     return issues
 
 
@@ -3968,7 +4121,7 @@ def build_part_05_operator_sequence(run_workspace: SubtopicRunWorkspace) -> str:
         "",
         "- Не начинать заново с `ТЕМА:` или `АНАЛИЗ ОБЛАСТИ ПРАВА`.",
         "- Не добавлять `A. РЕГУЛЯТОРНОЕ ЯДРО` и `B. ОПОРНЫЕ ДОКУМЕНТЫ`.",
-        "- Все URL и ссылочные идентификаторы держать только внутри fenced code blocks.",
+        "- Каждый найденный документ оформлять собственной карточкой или явно привязанным мини-блоком со ссылками и структурным элементом.",
         "- Один ответ = один диапазон слоев. Самостоятельный переход к следующему диапазону запрещен.",
         "",
     ]
@@ -3979,7 +4132,6 @@ def build_part_05_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
     part_05_input = next(part.content.strip() for part in run_workspace.parts if part.number == 5)
     literal_context_md = build_literal_context_bundle(run_workspace, 5)
     reasoning_brief_md = build_reasoning_part_brief(run_workspace, 5)
-    semantic_dedup_md = build_semantic_dedup_brief(run_workspace, 5)
     lines = [
         f"# Part 05 Range {segment['segment_id']}: {segment['label']}",
         "",
@@ -3987,13 +4139,12 @@ def build_part_05_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
         "",
         "Требования диапазона:",
         f"- Обработать только слои `{segment['label']}`.",
-        "- Не повторять документы, уже выданные в предыдущих частях, если Приказ прямо не требует нового документа по новому слою.",
+        "- Сначала проверить слой свежим внешним поиском, а уже потом решать вопрос о повторе или новой роли документа.",
         "- Для каждого применимого слоя дать найдено/не выявлено и документы строго после соответствующего слоя.",
-        "- Все URL, домены и идентификаторы ресурсов держать только внутри fenced code blocks.",
+        "- Каждый найденный документ оформлять собственной карточкой или явно привязанным мини-блоком со ссылками и структурным элементом.",
         "",
     ]
     lines.extend([reasoning_brief_md, ""])
-    lines.extend([semantic_dedup_md, ""])
     if literal_context_md:
         lines.extend([literal_context_md, ""])
     lines.extend(
@@ -4062,7 +4213,12 @@ def update_run_manifest_part_05_plan(run_workspace: SubtopicRunWorkspace, plan_p
     write_json(manifest_path, manifest)
 
 
-def update_run_manifest_part_status(run_workspace: SubtopicRunWorkspace, part_number: int, status: str) -> None:
+def update_run_manifest_part_status(
+    run_workspace: SubtopicRunWorkspace,
+    part_number: int,
+    status: str,
+    source_origin: str | None = None,
+) -> None:
     manifest_path = run_workspace.run_dir / "manifest.json"
     if not manifest_path.exists():
         return
@@ -4071,6 +4227,8 @@ def update_run_manifest_part_status(run_workspace: SubtopicRunWorkspace, part_nu
         if int(part.get("part_number", 0)) == part_number:
             part["status"] = status
             part["updated_at"] = utc_now_iso()
+            if source_origin is not None:
+                part["source_origin"] = source_origin
             break
     write_json(manifest_path, manifest)
 
@@ -4102,12 +4260,12 @@ def build_part_01_response(run_workspace: SubtopicRunWorkspace) -> str:
         "Понимаю: поиск по подтеме запускается только после завершения этапов I–II и сигнала `GO/СТАРТ`; ранняя остановка из-за \"сбоя\" запрещена; обязательна дожимка проверки до результата по каждому документу; критерий исполнения — закрытый цикл проверки, в котором документ получает один из конечных статусов: подтвержден по существованию/применимости/роли и `URL1`, усилен `VERIFIED URL2`, либо помещен в `КАРАНТИН` при реальной неопределенности по самому документу.",
         "",
         "**Пункт 8. Правила ссылок**  ",
-        "Понимаю: перед выдачей каждой ссылки требуется открытие страницы и сверка реквизитов; `URL1` даётся как якорь официальности даже если неудобочитаем, `URL2` — только после проверки; при неподтверждении `URL2` документ не исключается автоматически, а сохраняется по своей роли с пометкой статуса верификации, если сам документ уже подтвержден; все ссылки, идентификаторы ресурсов и блоки карантина в финальном ответе допустимы только внутри code-блоков.",
+        "Понимаю: перед выдачей каждой ссылки требуется открытие страницы и сверка реквизитов; `URL1` даётся как якорь официальности даже если неудобочитаем, но в финальном ответе должен сопровождаться полным официальным наименованием документа и читабельным `URL2`, когда он подтвержден; при неподтверждении `URL2` документ не исключается автоматически, а сохраняется по своей роли с пометкой статуса верификации.",
         "",
         "II. Подтверждаю понимание логики и дословного режима исполнения.",
         "",
         "**Что запрещено**  ",
-        "Запрещено начинать поиск и перечисление документов до завершения этапов I–II и сигнала `GO/СТАРТ`. Запрещено сокращать охват, заменять проверку предположением, исключать документ только из-за отсутствия второй подтверждённой ссылки, обходить слои, пропускать структурный элемент, подменять действие сообщением о сбое, а также размещать любые элементы ссылочного вида вне code-блоков.",
+        "Запрещено начинать поиск и перечисление документов до завершения этапов I–II и сигнала `GO/СТАРТ`. Запрещено сокращать охват, заменять проверку предположением, исключать документ только из-за отсутствия второй подтверждённой ссылки, обходить слои, пропускать структурный элемент, подменять действие сообщением о сбое, а также называть акт без полного официального наименования, структурного элемента и ссылочного сопровождения.",
         "",
         "**Что разрешено**  ",
         "Разрешены только реально действующие и применимые к теме нормативные акты и официальные документы: кодексы, федеральные законы, подзаконные акты, акты нотариального сообщества, письма и методические документы при подтверждённой применимости, а также иные официально опубликованные специальные акты соответствующих органов.",
@@ -4134,7 +4292,7 @@ def build_part_01_response(run_workspace: SubtopicRunWorkspace) -> str:
         "Перед выдачей нужно проверить три вещи по каждому документу: существует ли он реально, действует ли сейчас или подлежит применению нотариусом, есть ли официальный источник. При отрицательном ответе документ не может проходить как подтверждённый найденный документ.",
         "",
         "**Правила первой и второй ссылки**  ",
-        "Понимаю: `URL1` — якорь официальности, подлежит указанию даже если неудобочитаем; `URL2` — только после полного цикла проверки страницы и сверки реквизитов. При неподтверждении `URL2` документ не исключается автоматически, а сохраняется в выдаче с пометками `VERIFIED URL2`, `Заголовок страницы URL2`, `Сверка реквизитов` и канонической строкой поиска; в карантин он уходит только если остается сомнение в самом документе. Все элементы ссылочного формата — только внутри code-блоков.",
+        "Понимаю: `URL1` — якорь официальности, подлежит указанию даже если неудобочитаем; `URL2` — только после полного цикла проверки страницы и сверки реквизитов. При неподтверждении `URL2` документ не исключается автоматически, а сохраняется в выдаче с пометками `VERIFIED URL2`, `Заголовок страницы URL2`, `Сверка реквизитов` и канонической строкой поиска; в карантин он уходит только если остается сомнение в самом документе. Ссылочный формат в финальном ответе должен быть читабельным и привязанным к карточке каждого документа.",
         "Дополнительно понимаю: режим `URL2: отсутствует (КАРАНТИН)` описывает только статус поля `URL2` внутри карточки документа и не равен автоматическому переносу самого документа в раздел `КАРАНТИН`.",
         "",
         "**Подтверждаю применение анти-отказа и запрета на незавершённую проверку**  ",
@@ -4287,6 +4445,8 @@ def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) 
     if 2 not in included_parts:
         raise RuntimeError("Part 2 output is missing or still a stub; final assembly cannot start")
 
+    untrusted_parts = collect_untrusted_output_parts(run_workspace, included_parts)
+
     final_markdown = assemble_final_markdown_document(run_workspace, assembled_blocks)
     assembled_md = run_workspace.final_dir / "final.assembled.md"
     assembled_docx = run_workspace.final_dir / "final.assembled.docx"
@@ -4306,6 +4466,9 @@ def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) 
         "missing_parts": missing_parts,
         "assembled_md": str(assembled_md),
         "assembled_docx": str(assembled_docx),
+        "run_mode": "fresh-only",
+        "trusted_fresh_run": not bool(untrusted_parts),
+        "untrusted_parts": untrusted_parts,
         "published": False,
     }
 
@@ -4314,6 +4477,13 @@ def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) 
         if unresolved:
             raise RuntimeError(
                 f"Cannot publish final output while parts are still missing/stub: {unresolved}"
+            )
+        if untrusted_parts:
+            issues = ", ".join(
+                f"Part {item['part_number']} ({item['source_origin']})" for item in untrusted_parts
+            )
+            raise RuntimeError(
+                "Cannot publish this run as fresh-only: untrusted stage outputs detected: " + issues
             )
         write_text(run_workspace.final_md_target, final_markdown)
         replace_docx_body_with_text(
@@ -4435,14 +4605,24 @@ def write_subtopic_run_files(run_workspace: SubtopicRunWorkspace) -> None:
     part_05_plan_paths = write_part_05_plan(run_workspace, overwrite=False)
     followup_part_paths = write_followup_part_packets(run_workspace, overwrite=False)
     reasoning_layer_paths = write_reasoning_layer(run_workspace, overwrite=False)
-    semantic_dedup_paths = write_semantic_dedup_layer(run_workspace, overwrite=False)
-    omission_audit_paths = write_omission_audit_layer(run_workspace, overwrite=False)
+    semantic_dedup_paths = (
+        write_semantic_dedup_layer(run_workspace, overwrite=False)
+        if PRODUCTION_ENABLE_SEMANTIC_DEDUP
+        else None
+    )
+    omission_audit_paths = (
+        write_omission_audit_layer(run_workspace, overwrite=False)
+        if PRODUCTION_ENABLE_OMISSION_AUDIT
+        else None
+    )
     refresh_dynamic_part_packets(run_workspace)
     write_json(
         run_workspace.run_dir / "manifest.json",
         {
             "generated_at": utc_now_iso(),
             "status": "subtopic_run_prepared",
+            "run_mode": "fresh-only",
+            "allow_reuse_stage_outputs": False,
             "theme_id": run_workspace.theme_workspace.theme.theme_id,
             "theme_title": run_workspace.theme_workspace.theme.full_title,
             "subtopic_id": run_workspace.subtopic_entry.item_id,
@@ -4515,24 +4695,6 @@ def write_subtopic_run_files(run_workspace: SubtopicRunWorkspace) -> None:
                     for part_number, path in reasoning_layer_paths["brief_files"].items()
                 },
             },
-            "semantic_dedup": {
-                "dedup_dir": str(semantic_dedup_paths["dedup_dir"]),
-                "readme": str(semantic_dedup_paths["readme"]),
-                "snapshot_json": str(semantic_dedup_paths["snapshot_json"]),
-                "brief_files": {
-                    str(part_number): str(path)
-                    for part_number, path in semantic_dedup_paths["brief_files"].items()
-                },
-            },
-            "omission_audit": {
-                "audit_dir": str(omission_audit_paths["audit_dir"]),
-                "readme": str(omission_audit_paths["readme"]),
-                "snapshot_json": str(omission_audit_paths["snapshot_json"]),
-                "brief_files": {
-                    str(part_number): str(path)
-                    for part_number, path in omission_audit_paths["brief_files"].items()
-                },
-            },
             "parts": [
                 {
                     "part_number": part.number,
@@ -4541,11 +4703,39 @@ def write_subtopic_run_files(run_workspace: SubtopicRunWorkspace) -> None:
                     "input_file": str(run_workspace.stage_inputs_dir / part.filename),
                     "output_file": str(run_workspace.stage_outputs_dir / part.filename),
                     "status": "ready" if part.number == 1 else "blocked_until_go",
+                    "source_origin": "stub_template",
                 }
                 for part in run_workspace.parts
             ],
         },
     )
+    if semantic_dedup_paths is not None:
+        manifest_path = run_workspace.run_dir / "manifest.json"
+        manifest = json.loads(read_text(manifest_path))
+        manifest["semantic_dedup"] = {
+            "dedup_dir": str(semantic_dedup_paths["dedup_dir"]),
+            "readme": str(semantic_dedup_paths["readme"]),
+            "snapshot_json": str(semantic_dedup_paths["snapshot_json"]),
+            "brief_files": {
+                str(part_number): str(path)
+                for part_number, path in semantic_dedup_paths["brief_files"].items()
+            },
+        }
+        write_json(manifest_path, manifest)
+    if omission_audit_paths is not None:
+        manifest_path = run_workspace.run_dir / "manifest.json"
+        manifest = json.loads(read_text(manifest_path))
+        manifest["omission_audit"] = {
+            "audit_dir": str(omission_audit_paths["audit_dir"]),
+            "readme": str(omission_audit_paths["readme"]),
+            "snapshot_json": str(omission_audit_paths["snapshot_json"]),
+            "brief_files": {
+                str(part_number): str(path)
+                for part_number, path in omission_audit_paths["brief_files"].items()
+            },
+        }
+        write_json(manifest_path, manifest)
+    drop_disabled_manifest_layers(run_workspace)
 
 
 def default_workflow_paths(workspace_root: Path) -> dict[str, Path]:
@@ -4883,6 +5073,64 @@ def normalize_label_only_code_blocks(content: str) -> str:
     return normalized
 
 
+def is_link_metadata_line(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if is_link_group_label(stripped):
+        return True
+    if stripped.startswith("VERIFIED URL2:"):
+        return True
+    if stripped.startswith("Заголовок страницы URL2"):
+        return True
+    if stripped.startswith("Сверка реквизитов:"):
+        return True
+    if line_has_link_token(stripped):
+        return True
+    if stripped.startswith("отсутствует"):
+        return True
+    return False
+
+
+def flatten_link_only_code_blocks(content: str) -> str:
+    lines = content.splitlines()
+    result: list[str] = []
+    in_code_block = False
+    code_lines: list[str] = []
+
+    def flush_code_block() -> None:
+        nonlocal code_lines
+        if not code_lines:
+            return
+        if any(line.strip() for line in code_lines) and all(is_link_metadata_line(line) for line in code_lines):
+            result.extend(code_lines)
+        else:
+            result.append("```text")
+            result.extend(code_lines)
+            result.append("```")
+        code_lines = []
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            if in_code_block:
+                flush_code_block()
+                in_code_block = False
+            else:
+                in_code_block = True
+                code_lines = []
+            continue
+        if in_code_block:
+            code_lines.append(raw_line)
+            continue
+        result.append(raw_line)
+
+    if in_code_block:
+        flush_code_block()
+
+    return "\n".join(result)
+
+
 def is_structural_heading(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
@@ -4926,7 +5174,8 @@ def renumber_document_cards(content: str) -> str:
 
 
 def normalize_final_part_content(content: str) -> str:
-    normalized = normalize_label_only_code_blocks(content.strip())
+    normalized = flatten_link_only_code_blocks(content.strip())
+    normalized = normalize_label_only_code_blocks(normalized)
     normalized = renumber_document_cards(normalized)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
     return normalized
@@ -5035,6 +5284,16 @@ def build_docx_paragraph_specs(content: str) -> list[tuple[str, str]]:
 
         text = line.replace("**", "")
         if in_code_block:
+            specs.append((text, "code"))
+        elif (
+            stripped.startswith("URL1:")
+            or stripped.startswith("URL2:")
+            or stripped.startswith("VERIFIED URL2:")
+            or stripped.startswith("Заголовок страницы URL2")
+            or stripped.startswith("Сверка реквизитов:")
+            or stripped.startswith("Каноническая строка поиска:")
+            or line_has_link_token(stripped)
+        ):
             specs.append((text, "code"))
         elif is_structural_heading(stripped):
             specs.append((text, "subsection"))
@@ -5377,7 +5636,12 @@ def cmd_execute_part_01(args: argparse.Namespace) -> int:
                 f"Part 01 already has non-stub content: {output_path}. Use --force to overwrite."
             )
     write_text(output_path, build_part_01_response(run_workspace))
-    update_run_manifest_part_status(run_workspace, 1, "completed_waiting_for_go")
+    update_run_manifest_part_status(
+        run_workspace,
+        1,
+        "completed_waiting_for_go",
+        source_origin="execute_part_01",
+    )
     refresh_dynamic_part_packets(run_workspace)
     print(output_path)
     return 0
@@ -5427,7 +5691,12 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
         status = "completed_core_answer"
     else:
         status = "completed"
-    update_run_manifest_part_status(run_workspace, part_number, status)
+    update_run_manifest_part_status(
+        run_workspace,
+        part_number,
+        status,
+        source_origin="capture_part_output",
+    )
     refresh_dynamic_part_packets(run_workspace)
 
     if part_number == 2 and args.auto_assemble:
@@ -5446,13 +5715,16 @@ def cmd_prepare_part_02_web(args: argparse.Namespace) -> int:
     )
     plan_paths = write_part_02_web_plan(run_workspace, overwrite=args.force)
     reasoning_paths = write_reasoning_layer(run_workspace, overwrite=args.force)
-    semantic_dedup_paths = write_semantic_dedup_layer(run_workspace, overwrite=args.force)
-    omission_paths = write_omission_audit_layer(run_workspace, overwrite=args.force)
     refresh_dynamic_part_packets(run_workspace)
     update_run_manifest_web_plan(run_workspace, plan_paths)
     update_run_manifest_reasoning_layer(run_workspace, reasoning_paths)
-    update_run_manifest_semantic_dedup(run_workspace, semantic_dedup_paths)
-    update_run_manifest_omission_audit(run_workspace, omission_paths)
+    if PRODUCTION_ENABLE_SEMANTIC_DEDUP:
+        semantic_dedup_paths = write_semantic_dedup_layer(run_workspace, overwrite=args.force)
+        update_run_manifest_semantic_dedup(run_workspace, semantic_dedup_paths)
+    if PRODUCTION_ENABLE_OMISSION_AUDIT:
+        omission_paths = write_omission_audit_layer(run_workspace, overwrite=args.force)
+        update_run_manifest_omission_audit(run_workspace, omission_paths)
+    drop_disabled_manifest_layers(run_workspace)
     print(plan_paths["web_plan_dir"])
     return 0
 
@@ -5466,13 +5738,16 @@ def cmd_prepare_part_03_plan(args: argparse.Namespace) -> int:
     )
     plan_paths = write_part_03_plan(run_workspace, overwrite=args.force)
     reasoning_paths = write_reasoning_layer(run_workspace, overwrite=args.force)
-    semantic_dedup_paths = write_semantic_dedup_layer(run_workspace, overwrite=args.force)
-    omission_paths = write_omission_audit_layer(run_workspace, overwrite=args.force)
     refresh_dynamic_part_packets(run_workspace)
     update_run_manifest_part_03_plan(run_workspace, plan_paths)
     update_run_manifest_reasoning_layer(run_workspace, reasoning_paths)
-    update_run_manifest_semantic_dedup(run_workspace, semantic_dedup_paths)
-    update_run_manifest_omission_audit(run_workspace, omission_paths)
+    if PRODUCTION_ENABLE_SEMANTIC_DEDUP:
+        semantic_dedup_paths = write_semantic_dedup_layer(run_workspace, overwrite=args.force)
+        update_run_manifest_semantic_dedup(run_workspace, semantic_dedup_paths)
+    if PRODUCTION_ENABLE_OMISSION_AUDIT:
+        omission_paths = write_omission_audit_layer(run_workspace, overwrite=args.force)
+        update_run_manifest_omission_audit(run_workspace, omission_paths)
+    drop_disabled_manifest_layers(run_workspace)
     print(plan_paths["plan_dir"])
     return 0
 
@@ -5503,9 +5778,19 @@ def cmd_capture_part_03_range(args: argparse.Namespace) -> int:
     _, captured, remaining = rebuild_part_03_aggregated_output(run_workspace)
     update_part_03_capture_status(run_workspace, captured, remaining)
     if remaining:
-        update_run_manifest_part_status(run_workspace, 3, f"in_progress_segments_{len(captured)}_of_{len(PART_03_SEGMENTS)}")
+        update_run_manifest_part_status(
+            run_workspace,
+            3,
+            f"in_progress_segments_{len(captured)}_of_{len(PART_03_SEGMENTS)}",
+            source_origin="capture_part_03_range",
+        )
     else:
-        update_run_manifest_part_status(run_workspace, 3, "completed")
+        update_run_manifest_part_status(
+            run_workspace,
+            3,
+            "completed",
+            source_origin="capture_part_03_range",
+        )
     refresh_dynamic_part_packets(run_workspace)
     if args.auto_assemble:
         assemble_subtopic_final(run_workspace, publish=False)
@@ -5552,9 +5837,19 @@ def cmd_capture_part_04_range(args: argparse.Namespace) -> int:
     _, captured, remaining = rebuild_part_04_aggregated_output(run_workspace)
     update_part_04_capture_status(run_workspace, captured, remaining)
     if remaining:
-        update_run_manifest_part_status(run_workspace, 4, f"in_progress_segments_{len(captured)}_of_{len(PART_04_SEGMENTS)}")
+        update_run_manifest_part_status(
+            run_workspace,
+            4,
+            f"in_progress_segments_{len(captured)}_of_{len(PART_04_SEGMENTS)}",
+            source_origin="capture_part_04_range",
+        )
     else:
-        update_run_manifest_part_status(run_workspace, 4, "completed")
+        update_run_manifest_part_status(
+            run_workspace,
+            4,
+            "completed",
+            source_origin="capture_part_04_range",
+        )
     refresh_dynamic_part_packets(run_workspace)
     if args.auto_assemble:
         assemble_subtopic_final(run_workspace, publish=False)
@@ -5601,9 +5896,19 @@ def cmd_capture_part_05_range(args: argparse.Namespace) -> int:
     _, captured, remaining = rebuild_part_05_aggregated_output(run_workspace)
     update_part_05_capture_status(run_workspace, captured, remaining)
     if remaining:
-        update_run_manifest_part_status(run_workspace, 5, f"in_progress_segments_{len(captured)}_of_{len(PART_05_SEGMENTS)}")
+        update_run_manifest_part_status(
+            run_workspace,
+            5,
+            f"in_progress_segments_{len(captured)}_of_{len(PART_05_SEGMENTS)}",
+            source_origin="capture_part_05_range",
+        )
     else:
-        update_run_manifest_part_status(run_workspace, 5, "completed")
+        update_run_manifest_part_status(
+            run_workspace,
+            5,
+            "completed",
+            source_origin="capture_part_05_range",
+        )
     refresh_dynamic_part_packets(run_workspace)
     if args.auto_assemble:
         assemble_subtopic_final(run_workspace, publish=False)
