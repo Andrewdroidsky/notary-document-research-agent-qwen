@@ -89,7 +89,9 @@ python .\notary_agent.py run-subtopic 16.1.1
 - `01-stage-inputs` — вводный блок приказа и отдельные `part-01.md` ... `part-11.md`;
 - `02-stage-outputs` — stub-файлы под ответы по каждой Части;
 - `03-final` — локальный final-dir для `working.master.md`, `final.assembled.md/.docx` и `assembly.report.json`;
+- `03-final\skeletons` — lightweight-skeletons для Частей `10–11`;
 - `04-web-plan` — только обязательный web-first слой Части 2: `00-operator-sequence`, `message-01`, `message-02`, `message-03`, `queries`, `source-cascade`, `part-02.research-pack`, `part-02.core-template`, `part-02.launch-packet`, `research-log`, `evidence`;
+- `04-web-plan\part-03/04/05` — в lean-режиме хранятся lightweight canonical skeletons без тяжелых segmented message-пакетов;
 - `manifest.json` — статусы и режимы исполнения по всем 11 Частям.
 
 Если нужно явно указать основную тему, можно добавить `--theme-query`.

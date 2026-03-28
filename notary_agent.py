@@ -439,6 +439,36 @@ PART_05_SEGMENTS = [
     },
 ]
 
+PART_04_CONTROL_POINTS = [
+    "Росфинмониторинг",
+    "Банк России",
+    "Акты Федеральной нотариальной палаты",
+    "Акты нотариальных палат субъектов",
+    "Методические материалы/рекомендации (в составе акта ФНП)",
+    "Росреестр",
+    "Федеральная налоговая служба",
+    "Минюст РФ/территориальные органы",
+    "МВД",
+    "Минфин",
+    "ФОИВ",
+    "Правительство РФ",
+    "Президент РФ",
+    "ГОСТ/Росстандарт",
+    "Архивные правила",
+    "Персональные данные/ИБ",
+    "Электронная подпись",
+    "Иное",
+]
+
+PART_05_LAYER_POINTS = [
+    "слой 1: базовые кодексы/законы (при применимости)",
+    "слой 2: специальное нотариальное регулирование",
+    "слой 3: процессуальный/контрольный слой",
+    "слой 4: подзаконные НПА уполномоченных органов",
+    "слой 5: акты нотариального сообщества, обязательные для нотариусов",
+    "слой 6: судебные разъяснения",
+]
+
 QUERY_STOPWORDS = {
     "и",
     "или",
@@ -2989,6 +3019,77 @@ def build_part_03_canonical_skeleton() -> str:
     return "\n".join(lines)
 
 
+def build_part_04_canonical_skeleton() -> str:
+    lines = [
+        "# Part 04 Canonical Skeleton",
+        "",
+        "Использовать исходную нумерацию подпунктов 1–18. Для каждого подпункта: короткий статус, затем документы или FAIL-SAFE.",
+        "",
+    ]
+    for idx, label in enumerate(PART_04_CONTROL_POINTS, start=1):
+        lines.extend(
+            [
+                f"{idx}. {label}.",
+                "Статус: [НАЙДЕНО/НЕ ВЫЯВЛЕНО]",
+                "Документ(ы) / FAIL-SAFE: [заполнить]",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_part_05_canonical_skeleton() -> str:
+    lines = [
+        "# Part 05 Canonical Skeleton",
+        "",
+        "Использовать слойность 1–6. По каждому слою: статус, затем документы или FAIL-SAFE.",
+        "",
+    ]
+    for idx, label in enumerate(PART_05_LAYER_POINTS, start=1):
+        lines.extend(
+            [
+                f"{idx}. {label}.",
+                "Статус: [НАЙДЕНО/НЕ ВЫЯВЛЕНО]",
+                "Документ(ы) / FAIL-SAFE: [заполнить]",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_part_10_canonical_skeleton() -> str:
+    lines = [
+        "# Part 10 Canonical Skeleton",
+        "",
+        "Мини-конспект: строго 10-15 нумерованных пунктов. После каждого пункта обязателен ссылочный блок.",
+        "",
+    ]
+    for idx in range(1, 11):
+        lines.extend(
+            [
+                f"{idx}. [Смысловой пункт мини-конспекта]",
+                "",
+                "URL1: [заполнить]",
+                "URL2: [заполнить]",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_part_11_canonical_skeleton() -> str:
+    lines = [
+        "# Part 11 Canonical Skeleton",
+        "",
+        "Только перечень практических действий стажера для 4-й колонки дневника. Без документов и ссылок.",
+        "",
+    ]
+    for idx in range(1, 21):
+        lines.append(f"{idx}. [Практическое действие по характеру задания]")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def build_part_03_readme(run_workspace: SubtopicRunWorkspace) -> str:
     paths = build_part_03_plan_paths(run_workspace)
     lines = [
@@ -3724,6 +3825,16 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
                 "Part 3 is missing canonical VERSION 18 blocks: " + ", ".join(missing_blocks)
             )
 
+    if part_number == 4:
+        status_count = stripped.count("Статус:")
+        if status_count < 4:
+            issues.append("Part 4 should use explicit `Статус:` markers for the covered authority/control blocks")
+
+    if part_number == 5:
+        status_count = stripped.count("Статус:")
+        if status_count < 3:
+            issues.append("Part 5 should use explicit `Статус:` markers for the covered layers")
+
     if part_number == 10:
         items = extract_top_level_arabic_items(stripped)
         if not items:
@@ -3736,6 +3847,13 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
                 )
             if not (10 <= len(items) <= 15):
                 issues.append(f"Part 10 must contain 10-15 numbered points; found: {len(items)}")
+
+    if part_number == 11:
+        items = extract_top_level_arabic_items(stripped)
+        if len(items) < 15:
+            issues.append(f"Part 11 should contain an expanded practical-task list; found only {len(items)} numbered items")
+        if "URL1:" in stripped or "URL2:" in stripped or "VERIFIED URL2:" in stripped:
+            issues.append("Part 11 must not contain document links")
 
     return issues
 
@@ -3924,6 +4042,7 @@ def build_part_04_plan_paths(run_workspace: SubtopicRunWorkspace) -> dict[str, A
         "plan_dir": plan_dir,
         "readme": plan_dir / "README.part-04.md",
         "operator_sequence": plan_dir / "00-operator-sequence.md",
+        "canonical_skeleton": plan_dir / "part-04.canonical-skeleton.md",
         "capture_status": plan_dir / "capture-status.json",
         "message_files": message_files,
     }
@@ -3937,6 +4056,7 @@ def build_part_04_readme(run_workspace: SubtopicRunWorkspace) -> str:
         "Этот каталог готовит сегментированное исполнение Части 4 по подпунктам 3.1 Дополнительного алгоритма охвата.",
         "",
         f"- Operator sequence: `{paths['operator_sequence']}`",
+        f"- Canonical skeleton: `{paths['canonical_skeleton']}`",
         f"- Capture status: `{paths['capture_status']}`",
         f"- Aggregated output target: `{run_workspace.stage_outputs_dir / 'part-04.md'}`",
         "",
@@ -4051,6 +4171,7 @@ def write_part_04_plan(run_workspace: SubtopicRunWorkspace, overwrite: bool) -> 
     paths["plan_dir"].mkdir(parents=True, exist_ok=True)
     write_text_if_needed(paths["readme"], build_part_04_readme(run_workspace), overwrite)
     write_text_if_needed(paths["operator_sequence"], build_part_04_operator_sequence(run_workspace), overwrite)
+    write_text_if_needed(paths["canonical_skeleton"], build_part_04_canonical_skeleton(), overwrite)
     for segment in PART_04_SEGMENTS:
         write_text_if_needed(
             paths["message_files"][segment["segment_id"]],
@@ -4157,6 +4278,7 @@ def build_part_05_plan_paths(run_workspace: SubtopicRunWorkspace) -> dict[str, A
         "plan_dir": plan_dir,
         "readme": plan_dir / "README.part-05.md",
         "operator_sequence": plan_dir / "00-operator-sequence.md",
+        "canonical_skeleton": plan_dir / "part-05.canonical-skeleton.md",
         "capture_status": plan_dir / "capture-status.json",
         "message_files": message_files,
     }
@@ -4170,6 +4292,7 @@ def build_part_05_readme(run_workspace: SubtopicRunWorkspace) -> str:
         "Этот каталог готовит сегментированное исполнение Части 5 по слоям 1–6.",
         "",
         f"- Operator sequence: `{paths['operator_sequence']}`",
+        f"- Canonical skeleton: `{paths['canonical_skeleton']}`",
         f"- Capture status: `{paths['capture_status']}`",
         f"- Aggregated output target: `{run_workspace.stage_outputs_dir / 'part-05.md'}`",
         "",
@@ -4265,6 +4388,7 @@ def write_part_05_plan(run_workspace: SubtopicRunWorkspace, overwrite: bool) -> 
     paths["plan_dir"].mkdir(parents=True, exist_ok=True)
     write_text_if_needed(paths["readme"], build_part_05_readme(run_workspace), overwrite)
     write_text_if_needed(paths["operator_sequence"], build_part_05_operator_sequence(run_workspace), overwrite)
+    write_text_if_needed(paths["canonical_skeleton"], build_part_05_canonical_skeleton(), overwrite)
     for segment in PART_05_SEGMENTS:
         write_text_if_needed(
             paths["message_files"][segment["segment_id"]],
@@ -4545,6 +4669,7 @@ def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) 
         assembled_docx,
         final_markdown,
     )
+    write_local_metric_checkpoint(run_workspace, "assembled_final", target="assembled")
 
     report: dict[str, Any] = {
         "generated_at": utc_now_iso(),
@@ -4580,6 +4705,7 @@ def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) 
             run_workspace.final_docx_target,
             final_markdown,
         )
+        write_local_metric_checkpoint(run_workspace, "published_final", target="published")
         report["published"] = True
         report["published_md"] = str(run_workspace.final_md_target)
         report["published_docx"] = str(run_workspace.final_docx_target)
@@ -4690,7 +4816,18 @@ def write_subtopic_run_files(run_workspace: SubtopicRunWorkspace) -> None:
             final_skeleton_md,
         )
     master_working_md = refresh_master_working_file(run_workspace)
+    lightweight_skeleton_paths = write_lightweight_skeletons(run_workspace)
     web_plan_paths = write_part_02_web_plan(run_workspace, overwrite=False)
+    if run_workspace.lean_artifacts:
+        part_03_light_paths = build_part_03_plan_paths(run_workspace)
+        part_03_light_paths["plan_dir"].mkdir(parents=True, exist_ok=True)
+        write_text_if_needed(part_03_light_paths["canonical_skeleton"], build_part_03_canonical_skeleton(), overwrite=False)
+        part_04_light_paths = build_part_04_plan_paths(run_workspace)
+        part_04_light_paths["plan_dir"].mkdir(parents=True, exist_ok=True)
+        write_text_if_needed(part_04_light_paths["canonical_skeleton"], build_part_04_canonical_skeleton(), overwrite=False)
+        part_05_light_paths = build_part_05_plan_paths(run_workspace)
+        part_05_light_paths["plan_dir"].mkdir(parents=True, exist_ok=True)
+        write_text_if_needed(part_05_light_paths["canonical_skeleton"], build_part_05_canonical_skeleton(), overwrite=False)
     part_03_plan_paths = write_part_03_plan(run_workspace, overwrite=False) if not run_workspace.lean_artifacts else None
     part_04_plan_paths = write_part_04_plan(run_workspace, overwrite=False) if not run_workspace.lean_artifacts else None
     part_05_plan_paths = write_part_05_plan(run_workspace, overwrite=False) if not run_workspace.lean_artifacts else None
@@ -4725,6 +4862,10 @@ def write_subtopic_run_files(run_workspace: SubtopicRunWorkspace) -> None:
             "canonical_final_md_target": str(run_workspace.final_md_target),
             "canonical_final_docx_target": str(run_workspace.final_docx_target),
             "master_working_md": str(master_working_md),
+            "lightweight_skeletons": {
+                "part_10": str(lightweight_skeleton_paths["part_10"]),
+                "part_11": str(lightweight_skeleton_paths["part_11"]),
+            },
             "part_02_web_plan": {
                 "web_plan_dir": str(web_plan_paths["web_plan_dir"]),
                 "operator_sequence": str(web_plan_paths["operator_sequence"]),
@@ -5348,6 +5489,23 @@ def build_master_working_markdown(run_workspace: SubtopicRunWorkspace) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def build_lightweight_skeleton_paths(run_workspace: SubtopicRunWorkspace) -> dict[str, Path]:
+    skeleton_dir = run_workspace.final_dir / "skeletons"
+    return {
+        "dir": skeleton_dir,
+        "part_10": skeleton_dir / "part-10.canonical-skeleton.md",
+        "part_11": skeleton_dir / "part-11.canonical-skeleton.md",
+    }
+
+
+def write_lightweight_skeletons(run_workspace: SubtopicRunWorkspace) -> dict[str, Path]:
+    paths = build_lightweight_skeleton_paths(run_workspace)
+    paths["dir"].mkdir(parents=True, exist_ok=True)
+    write_text(paths["part_10"], build_part_10_canonical_skeleton())
+    write_text(paths["part_11"], build_part_11_canonical_skeleton())
+    return paths
+
+
 def refresh_master_working_file(run_workspace: SubtopicRunWorkspace) -> Path:
     master_path = run_workspace.final_dir / "working.master.md"
     write_text(master_path, build_master_working_markdown(run_workspace))
@@ -5385,6 +5543,46 @@ def read_docx_page_count(path: Path) -> int | None:
         return int((pages_node.text or "").strip())
     except Exception:
         return None
+
+
+def write_local_metric_checkpoint(run_workspace: SubtopicRunWorkspace, checkpoint_name: str, target: str = "master") -> Path:
+    checkpoints_dir = run_workspace.final_dir / "checkpoints"
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    if target == "master":
+        source_path = refresh_master_working_file(run_workspace)
+        text = read_text(source_path)
+        page_count = None
+    elif target == "assembled":
+        source_path = run_workspace.final_dir / "final.assembled.md"
+        if not source_path.exists():
+            return checkpoints_dir / f"{checkpoint_name}.missing.json"
+        text = read_text(source_path)
+        page_count = read_docx_page_count(run_workspace.final_dir / "final.assembled.docx")
+    elif target == "published":
+        source_path = run_workspace.final_md_target
+        if not source_path.exists():
+            return checkpoints_dir / f"{checkpoint_name}.missing.json"
+        text = read_text(source_path)
+        page_count = read_docx_page_count(run_workspace.final_docx_target)
+    else:
+        raise RuntimeError("Unsupported checkpoint target")
+    metrics = compute_text_metrics(text)
+    payload = {
+        "generated_at": utc_now_iso(),
+        "checkpoint": checkpoint_name,
+        "target": target,
+        "source_path": str(source_path),
+        "words": metrics["words"],
+        "chars": metrics["chars"],
+        "url1": metrics["url1"],
+        "url2": metrics["url2"],
+        "verified_url2": metrics["verified_url2"],
+        "document_cards": metrics["document_cards"],
+        "page_count": page_count,
+    }
+    checkpoint_path = checkpoints_dir / f"{checkpoint_name}.{target}.json"
+    write_json(checkpoint_path, payload)
+    return checkpoint_path
 
 
 def paragraph_element(
@@ -5934,6 +6132,10 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
     )
     refresh_dynamic_part_packets(run_workspace)
     refresh_master_working_file(run_workspace)
+    if part_number == 5:
+        write_local_metric_checkpoint(run_workspace, "after_parts_02_05", target="master")
+    elif part_number == 11:
+        write_local_metric_checkpoint(run_workspace, "after_parts_02_11", target="master")
 
     if part_number == 2 and args.auto_assemble:
         assemble_subtopic_final(run_workspace, publish=False)
