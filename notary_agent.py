@@ -37,6 +37,20 @@ ARTIFACT_PROFILE_ENV = "NOTARY_AGENT_ARTIFACT_PROFILE"
 ARTIFACT_PROFILE_LEAN = "lean"
 ARTIFACT_PROFILE_FULL = "full"
 DEFAULT_ARTIFACT_PROFILE = os.environ.get(ARTIFACT_PROFILE_ENV, ARTIFACT_PROFILE_LEAN).strip().lower() or ARTIFACT_PROFILE_LEAN
+PACKET_MODE_ENV = "NOTARY_AGENT_PACKET_MODE"
+PACKET_MODE_LEAN = "lean-default"
+PACKET_MODE_LITERAL = "literal-safe"
+DEFAULT_PACKET_MODE = os.environ.get(PACKET_MODE_ENV, PACKET_MODE_LEAN).strip().lower() or PACKET_MODE_LEAN
+RUN_MODE_FRESH = "fresh-only"
+RUN_MODE_SURGICAL = "surgical-redo"
+STRICT_ORCHESTRATION_TARGET_PERCENT = 3.0
+SURGICAL_ALLOWED_COMMANDS = {
+    "capture-part-output",
+    "prepare-part-02-web",
+    "prepare-part-03-plan",
+    "capture-part-03-range",
+    "metric-check",
+}
 
 PART_EXECUTION_MODES = {
     1: "rules_confirmation_wait_go",
@@ -928,6 +942,8 @@ class MainThemeWorkspace:
     default_outline_entries: list[OutlineEntry]
     outline_entries: list[OutlineEntry]
     override_path: str | None
+    packet_mode: str = DEFAULT_PACKET_MODE
+    packet_mode_reason: str = ""
 
 
 @dataclass
@@ -961,10 +977,20 @@ class SubtopicRunWorkspace:
     intro_block: str
     parts: list[OrderPart]
     artifact_profile: str = ARTIFACT_PROFILE_LEAN
+    packet_mode: str = DEFAULT_PACKET_MODE
+    packet_mode_reason: str = ""
+    run_mode: str = RUN_MODE_FRESH
+    allowed_parts: tuple[int, ...] = ()
+    strict_lean_mode: bool = True
+    orchestration_target_percent: float = STRICT_ORCHESTRATION_TARGET_PERCENT
 
     @property
     def lean_artifacts(self) -> bool:
         return self.artifact_profile != ARTIFACT_PROFILE_FULL
+
+    @property
+    def is_surgical_redo(self) -> bool:
+        return self.run_mode == RUN_MODE_SURGICAL
 
 
 def normalize_artifact_profile(value: str | None) -> str:
@@ -974,12 +1000,101 @@ def normalize_artifact_profile(value: str | None) -> str:
     return candidate
 
 
+def normalize_packet_mode(value: str | None) -> str:
+    candidate = (value or DEFAULT_PACKET_MODE).strip().lower()
+    if candidate not in {PACKET_MODE_LEAN, PACKET_MODE_LITERAL}:
+        return PACKET_MODE_LEAN
+    return candidate
+
+
+def normalize_packet_mode_reason(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def normalize_run_mode(value: str | None) -> str:
+    candidate = (value or RUN_MODE_FRESH).strip().lower()
+    if candidate not in {RUN_MODE_FRESH, RUN_MODE_SURGICAL}:
+        return RUN_MODE_FRESH
+    return candidate
+
+
+def normalize_allowed_parts(value: Any) -> tuple[int, ...]:
+    if value in (None, "", []):
+        return ()
+    if isinstance(value, str):
+        raw_items = [item.strip() for item in value.split(",")]
+    else:
+        raw_items = [str(item).strip() for item in value]
+    normalized: list[int] = []
+    for item in raw_items:
+        if not item:
+            continue
+        number = int(item)
+        if number < 1 or number > 11:
+            raise RuntimeError(f"Allowed part is out of range: {number}")
+        if number not in normalized:
+            normalized.append(number)
+    return tuple(normalized)
+
+
+def load_existing_run_execution_contract(run_dir: Path) -> dict[str, Any]:
+    manifest_path = run_dir / "manifest.json"
+    manifest = load_json_if_exists(manifest_path) or {}
+    target_percent = manifest.get("orchestration_target_percent", STRICT_ORCHESTRATION_TARGET_PERCENT)
+    try:
+        normalized_target = float(target_percent)
+    except (TypeError, ValueError):
+        normalized_target = STRICT_ORCHESTRATION_TARGET_PERCENT
+    return {
+        "run_mode": normalize_run_mode(manifest.get("run_mode")),
+        "allowed_parts": normalize_allowed_parts(manifest.get("allowed_parts")),
+        "strict_lean_mode": bool(manifest.get("strict_lean_mode", True)),
+        "orchestration_target_percent": normalized_target,
+    }
+
+
+def assert_run_command_allowed(
+    run_workspace: SubtopicRunWorkspace,
+    command_name: str,
+    *,
+    part_number: int | None = None,
+) -> None:
+    if run_workspace.is_surgical_redo:
+        if command_name not in SURGICAL_ALLOWED_COMMANDS:
+            raise RuntimeError(
+                f"Run {run_workspace.run_dir} is locked in surgical-redo mode. "
+                f"Command `{command_name}` is forbidden."
+            )
+        if part_number is not None and run_workspace.allowed_parts and part_number not in run_workspace.allowed_parts:
+            raise RuntimeError(
+                f"Run {run_workspace.run_dir} is locked in surgical-redo mode for parts "
+                f"{', '.join(str(item) for item in run_workspace.allowed_parts)}. "
+                f"Part {part_number} is forbidden."
+            )
+
+
 def load_existing_run_artifact_profile(run_dir: Path) -> str:
     manifest_path = run_dir / "manifest.json"
     manifest = load_json_if_exists(manifest_path)
     if not manifest:
         return DEFAULT_ARTIFACT_PROFILE
     return normalize_artifact_profile(manifest.get("artifact_profile"))
+
+
+def load_existing_run_packet_mode(run_dir: Path) -> str:
+    manifest_path = run_dir / "manifest.json"
+    manifest = load_json_if_exists(manifest_path)
+    if not manifest:
+        return DEFAULT_PACKET_MODE
+    return normalize_packet_mode(manifest.get("packet_mode"))
+
+
+def load_existing_run_packet_mode_reason(run_dir: Path) -> str:
+    manifest_path = run_dir / "manifest.json"
+    manifest = load_json_if_exists(manifest_path)
+    if not manifest:
+        return ""
+    return normalize_packet_mode_reason(manifest.get("packet_mode_reason"))
 
 
 def parse_main_theme_heading(value: str) -> tuple[str, str]:
@@ -1221,13 +1336,64 @@ def build_execution_packet(
     master_prompt_text: str,
     generated_order_text: str,
     interaction_guide_text: str,
+    packet_mode: str = DEFAULT_PACKET_MODE,
+    packet_mode_reason: str = "",
 ) -> str:
+    def guard_no_canonical_inline(payload: str) -> None:
+        canonical_map = {
+            "00-context/03-master-prompt.md": master_prompt_text.strip(),
+            "00-context/06-order.copy.md": generated_order_text.strip(),
+            "00-context/08-interaction-guide.md": interaction_guide_text.strip(),
+        }
+        for path, text in canonical_map.items():
+            if text and text in payload:
+                raise ValueError(f"Canonical file must not be inlined: {path}")
+
+    packet_mode = normalize_packet_mode(packet_mode)
+    packet_mode_reason = normalize_packet_mode_reason(packet_mode_reason)
+    if packet_mode == PACKET_MODE_LITERAL:
+        if not packet_mode_reason:
+            raise RuntimeError(
+                "literal-safe packet mode requires an explicit reason because full canonical texts are already available as run files."
+            )
+        lines = [
+            f"# Execution Packet: {subtopic_line}",
+            "",
+            f"> Packet mode: `{PACKET_MODE_LITERAL}`",
+            f"> Reason: {packet_mode_reason}",
+            "",
+            "## Основная тема",
+            "",
+            theme.full_title,
+            "",
+            "## Обязательный порядок",
+            "",
+            "1. Прочитать AGENTS.md.",
+            "2. Прочитать PROJECT_STATE.md.",
+            "3. Прочитать manual-workflow.md.",
+            "4. Прочитать мастер-промпт.",
+            "5. Прочитать выбранную тему из Утверждаю и Оглавление.",
+            "6. Прочитать сгенерированную копию приказа по текущей подтеме.",
+            "7. Использовать guide по механике взаимодействия в окне LLM.",
+            "",
+            "## Ссылки на канон",
+            "",
+            "[см. 00-context/03-master-prompt.md]",
+            "[см. 00-context/06-order.copy.md]",
+            "[см. 00-context/08-interaction-guide.md]",
+            "",
+        ]
+        return "\n".join(lines)
     lines = [
         f"# Execution Packet: {subtopic_line}",
         "",
         "## Основная тема",
         "",
         theme.full_title,
+        "",
+        "## Текущая подтема",
+        "",
+        subtopic_line,
         "",
         "## Обязательный порядок",
         "",
@@ -1239,20 +1405,76 @@ def build_execution_packet(
         "6. Прочитать сгенерированную копию приказа по текущей подтеме.",
         "7. Использовать guide по механике взаимодействия в окне LLM.",
         "",
-        "## Мастер-Промпт",
+        "## Ссылки на канон",
         "",
-        master_prompt_text.strip(),
-        "",
-        "## Сгенерированная копия приказа",
-        "",
-        generated_order_text.strip(),
-        "",
-        "## Механика и стиль взаимодействия в окне LLM",
-        "",
-        interaction_guide_text.strip(),
+        "[см. 00-context/00-agents.md]",
+        "[см. 00-context/01-project-state.md]",
+        "[см. 00-context/02-manual-workflow.md]",
+        "[см. 00-context/03-master-prompt.md]",
+        "[см. 00-context/06-order.copy.md]",
+        "[см. 00-context/08-interaction-guide.md]",
         "",
     ]
-    return "\n".join(lines)
+    packet_text = "\n".join(lines)
+    guard_no_canonical_inline(packet_text)
+    return packet_text
+
+
+def extract_execution_packet_index(text: str, max_items: int = 20) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        normalized = line.strip("*").strip()
+        if not normalized:
+            continue
+        is_heading = False
+        if line.startswith("#"):
+            is_heading = True
+        elif line.startswith("**") and line.endswith("**"):
+            is_heading = True
+        elif re.match(r"^(ЧАСТЬ\s+\d+|[IVXLCDM]+\.)", normalized):
+            is_heading = True
+        if not is_heading:
+            continue
+        normalized = re.sub(r"\s+", " ", normalized)
+        if len(normalized) > 220:
+            normalized = normalized[:217].rstrip() + "..."
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(f"- {normalized}")
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def extract_execution_packet_excerpt(
+    text: str,
+    max_nonempty_lines: int = 40,
+    max_chars: int = 8000,
+) -> str:
+    selected: list[str] = []
+    total_chars = 0
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if not line.strip():
+            if selected and selected[-1] != "":
+                selected.append("")
+            continue
+        selected.append(line)
+        total_chars += len(line) + 1
+        nonempty_lines = sum(1 for item in selected if item.strip())
+        if nonempty_lines >= max_nonempty_lines or total_chars >= max_chars:
+            break
+    while selected and not selected[-1].strip():
+        selected.pop()
+    excerpt = "\n".join(selected).strip()
+    if excerpt and len(excerpt) < len(text.strip()):
+        excerpt = excerpt.rstrip() + "\n\n[... сокращено в execution packet; полный guide не дублируется здесь ...]"
+    return excerpt
 
 
 def find_outline_entry(outline_entries: list[OutlineEntry], subtopic_id: str) -> OutlineEntry:
@@ -1284,6 +1506,8 @@ def render_generated_orders(workspace: MainThemeWorkspace) -> list[dict[str, str
             master_prompt_text=workspace.master_prompt_text,
             generated_order_text=order_text,
             interaction_guide_text=workspace.interaction_guide_text,
+            packet_mode=workspace.packet_mode,
+            packet_mode_reason=workspace.packet_mode_reason,
         )
         packet_path = workspace.packets_dir / order_name
         write_text(packet_path, packet_text)
@@ -1896,10 +2120,16 @@ def collect_literal_context_parts(
     target_part_number: int,
 ) -> list[tuple[int, str]]:
     collected: list[tuple[int, str]] = []
-    for part_number in range(1, target_part_number):
+    for part_number in range(2, target_part_number):
         content = load_completed_part_output(run_workspace, part_number)
         if content:
-            collected.append((part_number, content))
+            name_lines = [
+                line.strip()
+                for line in content.splitlines()
+                if "Полное наименование:" in line
+            ]
+            if name_lines:
+                collected.append((part_number, "\n".join(name_lines)))
     return collected
 
 
@@ -1927,6 +2157,147 @@ def build_literal_context_bundle(
                 "",
             ]
         )
+    return "\n".join(lines).rstrip()
+
+
+def count_non_overlapping(text: str, needle: str) -> int:
+    if not needle:
+        return 0
+    return text.count(needle)
+
+
+def extract_first_substantive_paragraphs(
+    content: str,
+    max_paragraphs: int = 2,
+    max_chars: int = 1800,
+) -> str:
+    paragraphs: list[str] = []
+    for raw_paragraph in re.split(r"\n\s*\n", content):
+        paragraph = raw_paragraph.strip()
+        if not paragraph:
+            continue
+        if paragraph.startswith("```"):
+            continue
+        if paragraph.startswith("#"):
+            continue
+        if paragraph.startswith("ТЕМА:"):
+            continue
+        if paragraph.startswith("## "):
+            continue
+        paragraphs.append(re.sub(r"\s+", " ", paragraph))
+        if len(paragraphs) >= max_paragraphs:
+            break
+    summary = "\n\n".join(paragraphs).strip()
+    if len(summary) > max_chars:
+        summary = summary[: max_chars - 3].rstrip() + "..."
+    return summary
+
+
+def extract_anchor_lines_for_followup(
+    content: str,
+    max_items: int = 8,
+) -> list[str]:
+    anchors: list[str] = []
+    seen: set[str] = set()
+    lines = content.splitlines()
+    for index, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line or not re.match(r"^\d+\.\s+", line):
+            continue
+        if len(line) > 320:
+            continue
+        nearby = "\n".join(lines[index : min(index + 8, len(lines))])
+        if "URL1:" not in nearby and "Новый правовой узел:" not in nearby and "Структурный элемент:" not in nearby:
+            continue
+        normalized = re.sub(r"\s+", " ", line)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        anchors.append(f"- {normalized}")
+        if len(anchors) >= max_items:
+            break
+    return anchors
+
+
+def extract_last_substantive_paragraph(
+    content: str,
+    max_chars: int = 900,
+) -> str:
+    paragraphs = []
+    for raw_paragraph in re.split(r"\n\s*\n", content):
+        paragraph = raw_paragraph.strip()
+        if not paragraph:
+            continue
+        if paragraph.startswith("```"):
+            continue
+        if "URL1:" in paragraph or "URL2:" in paragraph:
+            continue
+        paragraphs.append(re.sub(r"\s+", " ", paragraph))
+    if not paragraphs:
+        return ""
+    tail = paragraphs[-1]
+    if len(tail) > max_chars:
+        tail = tail[: max_chars - 3].rstrip() + "..."
+    return tail
+
+
+def infer_part_decision_label(part_number: int) -> str:
+    if part_number == 2:
+        return "Базовый правовой и документный каркас подтвержден"
+    if part_number == 3:
+        return "Слои поиска и блоки покрытия разложены"
+    if part_number == 4:
+        return "Диапазоны документов и узлы покрытия расширены"
+    if part_number == 5:
+        return "Смежные правовые слои и специальные режимы добраны"
+    if part_number in {6, 7, 8, 9}:
+        return "Новый документный материал и дельта-усиление зафиксированы"
+    if part_number == 10:
+        return "Мини-конспект и опорные подтверждения собраны"
+    if part_number == 11:
+        return "Практические действия для дневника сформированы"
+    return "Промежуточное решение по части зафиксировано"
+
+
+def build_decision_history_bundle(
+    run_workspace: SubtopicRunWorkspace,
+    target_part_number: int,
+) -> str:
+    context_parts = collect_literal_context_parts(run_workspace, target_part_number)
+    if not context_parts:
+        return ""
+
+    lines = [
+        "## История решений этой же подтемы",
+        "",
+        "Ниже дана не история текста, а история уже принятых решений по этой же подтеме.",
+        "Использовать ее как рабочую память: что уже подтверждено, на какие документы уже опираемся и что нужно переносить дальше.",
+        "",
+    ]
+    for part_number, content in context_parts:
+        title = FINAL_PART_TITLES.get(part_number, f"ЧАСТЬ {part_number}")
+        url1_count = count_non_overlapping(content, "URL1:")
+        url2_count = count_non_overlapping(content, "URL2:")
+        verified_count = count_non_overlapping(content, "VERIFIED URL2:")
+        anchors = extract_anchor_lines_for_followup(content)
+        opening = extract_first_substantive_paragraphs(content)
+        tail = extract_last_substantive_paragraph(content)
+        lines.extend(
+            [
+                f"### ЧАСТЬ {part_number}. {title}",
+                "",
+                f"- Принятое решение: {infer_part_decision_label(part_number)}.",
+                f"- Зафиксировано в части: URL1={url1_count}, URL2={url2_count}, VERIFIED_URL2={verified_count}.",
+            ]
+        )
+        if opening:
+            lines.extend(["", "Что уже установлено:", "", opening])
+        if anchors:
+            lines.extend(["", "На что уже можно опираться дальше:", ""])
+            lines.extend(anchors)
+        if tail:
+            lines.extend(["", "Что переносится в следующую часть:", "", tail])
+        lines.append("")
     return "\n".join(lines).rstrip()
 
 
@@ -2106,7 +2477,7 @@ def find_missing_canonical_part_03_blocks(text: str | None) -> list[str]:
         return list(PART_03_CANONICAL_BLOCKS.keys())
     found: set[str] = set()
     for roman, title in PART_03_CANONICAL_BLOCKS.items():
-        pattern = re.compile(rf"(?m)^\s*\*{{0,2}}{re.escape(roman)}\.\s+{re.escape(title)}\b")
+        pattern = re.compile(rf"(?m)^\s*\*{{0,2}}{re.escape(roman)}\.\s+{re.escape(title)}(?:$|\s|\*)")
         if pattern.search(text):
             found.add(roman)
     return [roman for roman in PART_03_CANONICAL_BLOCKS if roman not in found]
@@ -2695,8 +3066,29 @@ def build_followup_part_boosters(part_number: int) -> list[str]:
 
 
 def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number: int) -> str:
+    def guard_no_canonical_inline(payload: str) -> None:
+        canonical_paths = [
+            run_workspace.context_dir / "00-agents.md",
+            run_workspace.context_dir / "01-project-state.md",
+            run_workspace.context_dir / "02-manual-workflow.md",
+            run_workspace.context_dir / "03-master-prompt.md",
+            run_workspace.context_dir / "06-order.copy.md",
+            run_workspace.context_dir / "08-interaction-guide.md",
+        ]
+        for canonical_path in canonical_paths:
+            if not canonical_path.exists():
+                continue
+            canonical_text = read_text(canonical_path).strip()
+            if canonical_text and canonical_text in payload:
+                relative_path = canonical_path.relative_to(run_workspace.run_dir).as_posix()
+                raise ValueError(f"Canonical file must not be inlined: {relative_path}")
+
     part = get_order_part(run_workspace, part_number)
-    literal_context_md = build_literal_context_bundle(run_workspace, part_number)
+    context_md = (
+        build_literal_context_bundle(run_workspace, part_number)
+        if run_workspace.packet_mode == PACKET_MODE_LITERAL
+        else build_decision_history_bundle(run_workspace, part_number)
+    )
     reasoning_brief_md = build_reasoning_part_brief(run_workspace, part_number)
     title = FINAL_PART_TITLES.get(part_number, f"ЧАСТЬ {part_number}")
     lines = [
@@ -2705,6 +3097,15 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
         "Режим: максимально буквальное продолжение той же LLM-сессии по этой подтеме.",
         "- Не перезапускать Части 1–5 и не возвращаться к `ТЕМА/АНАЛИЗ`, если текущая Часть этого не требует.",
         "- Не ослаблять охват: использовать уже найденный материал как опору и дожимать именно текущую Часть.",
+        "",
+        "## Ссылки на канон",
+        "",
+        "[см. 00-context/00-agents.md]",
+        "[см. 00-context/01-project-state.md]",
+        "[см. 00-context/02-manual-workflow.md]",
+        "[см. 00-context/03-master-prompt.md]",
+        "[см. 00-context/06-order.copy.md]",
+        "[см. 00-context/08-interaction-guide.md]",
         "",
     ]
     if part_number == 11:
@@ -2729,8 +3130,8 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
         for item in boosters:
             lines.append(f"- {item}")
         lines.append("")
-    if literal_context_md:
-        lines.extend([literal_context_md, ""])
+    if context_md:
+        lines.extend([context_md, ""])
     lines.extend(
         [
             f"## Точная инструкция Части {part_number}",
@@ -2743,7 +3144,9 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
             "",
         ]
     )
-    return "\n".join(lines)
+    packet_text = "\n".join(lines)
+    guard_no_canonical_inline(packet_text)
+    return packet_text
 
 
 def build_followup_part_packet_paths(run_workspace: SubtopicRunWorkspace) -> dict[str, Any]:
@@ -3427,9 +3830,17 @@ def build_subtopic_run_workspace_for_dir(
     run_dir: Path,
     render_orders: bool = True,
     artifact_profile: str = DEFAULT_ARTIFACT_PROFILE,
+    packet_mode: str | None = None,
+    packet_mode_reason: str | None = None,
 ) -> SubtopicRunWorkspace:
     artifact_profile = normalize_artifact_profile(artifact_profile)
+    resolved_packet_mode = normalize_packet_mode(packet_mode or theme_workspace.packet_mode)
+    resolved_packet_mode_reason = normalize_packet_mode_reason(
+        packet_mode_reason if packet_mode_reason is not None else theme_workspace.packet_mode_reason
+    )
     if render_orders:
+        theme_workspace.packet_mode = resolved_packet_mode
+        theme_workspace.packet_mode_reason = resolved_packet_mode_reason
         render_generated_orders(theme_workspace)
     subtopic_entry = find_outline_entry(theme_workspace.outline_entries, subtopic_id)
 
@@ -3454,6 +3865,13 @@ def build_subtopic_run_workspace_for_dir(
     for directory in [context_dir, stage_inputs_dir, stage_outputs_dir, final_dir, web_plan_dir]:
         directory.mkdir(parents=True, exist_ok=True)
 
+    execution_contract = load_existing_run_execution_contract(run_dir) if (run_dir / "manifest.json").exists() else {
+        "run_mode": RUN_MODE_FRESH,
+        "allowed_parts": (),
+        "strict_lean_mode": True,
+        "orchestration_target_percent": STRICT_ORCHESTRATION_TARGET_PERCENT,
+    }
+
     return SubtopicRunWorkspace(
         theme_workspace=theme_workspace,
         subtopic_entry=subtopic_entry,
@@ -3473,6 +3891,12 @@ def build_subtopic_run_workspace_for_dir(
         intro_block=intro_block,
         parts=parts,
         artifact_profile=artifact_profile,
+        packet_mode=resolved_packet_mode,
+        packet_mode_reason=resolved_packet_mode_reason,
+        run_mode=execution_contract["run_mode"],
+        allowed_parts=execution_contract["allowed_parts"],
+        strict_lean_mode=execution_contract["strict_lean_mode"],
+        orchestration_target_percent=execution_contract["orchestration_target_percent"],
     )
 
 
@@ -3481,10 +3905,19 @@ def prepare_subtopic_run_workspace(
     subtopic_id: str,
     theme_query: str | None = None,
     artifact_profile: str = DEFAULT_ARTIFACT_PROFILE,
+    packet_mode: str = DEFAULT_PACKET_MODE,
+    packet_mode_reason: str = "",
 ) -> SubtopicRunWorkspace:
     artifact_profile = normalize_artifact_profile(artifact_profile)
+    packet_mode = normalize_packet_mode(packet_mode)
+    packet_mode_reason = normalize_packet_mode_reason(packet_mode_reason)
     resolved_theme_query = theme_query or subtopic_id.split(".", 1)[0]
-    theme_workspace = prepare_main_theme_workspace(workspace_root, resolved_theme_query)
+    theme_workspace = prepare_main_theme_workspace(
+        workspace_root,
+        resolved_theme_query,
+        packet_mode=packet_mode,
+        packet_mode_reason=packet_mode_reason,
+    )
     write_main_theme_context_files(theme_workspace)
     write_outline_phase_files(theme_workspace)
 
@@ -3510,9 +3943,12 @@ def ensure_subtopic_run_workspace(
     workspace_root: Path,
     subtopic_id: str,
     theme_query: str | None = None,
+    packet_mode: str = DEFAULT_PACKET_MODE,
+    create_if_missing: bool = True,
 ) -> SubtopicRunWorkspace:
     resolved_theme_query = theme_query or subtopic_id.split(".", 1)[0]
-    theme_workspace = prepare_main_theme_workspace(workspace_root, resolved_theme_query)
+    packet_mode = normalize_packet_mode(packet_mode)
+    theme_workspace = prepare_main_theme_workspace(workspace_root, resolved_theme_query, packet_mode=packet_mode)
     write_main_theme_context_files(theme_workspace)
     write_outline_phase_files(theme_workspace)
 
@@ -3525,6 +3961,10 @@ def ensure_subtopic_run_workspace(
     run_root = theme_workspace.theme_folder / "05-runs" / subtopic_id
     existing_runs = [path for path in run_root.iterdir() if path.is_dir()] if run_root.exists() else []
     if not existing_runs:
+        if not create_if_missing:
+            raise RuntimeError(
+                f"No existing run found for subtopic {subtopic_id}. Surgical/partial operations require a warm run."
+            )
         run_workspace = prepare_subtopic_run_workspace(
             workspace_root=workspace_root,
             subtopic_id=subtopic_id,
@@ -3534,12 +3974,16 @@ def ensure_subtopic_run_workspace(
         return run_workspace
 
     latest_run = max(existing_runs, key=lambda path: path.name)
+    existing_packet_mode = load_existing_run_packet_mode(latest_run)
+    existing_packet_mode_reason = load_existing_run_packet_mode_reason(latest_run)
     return build_subtopic_run_workspace_for_dir(
         theme_workspace,
         subtopic_id,
         latest_run,
         render_orders=False,
         artifact_profile=load_existing_run_artifact_profile(latest_run),
+        packet_mode=existing_packet_mode,
+        packet_mode_reason=existing_packet_mode_reason,
     )
 
 
@@ -4786,8 +5230,6 @@ def write_subtopic_run_files(run_workspace: SubtopicRunWorkspace) -> None:
     copy_if_exists(run_workspace.order_path, run_workspace.context_dir / "06-order.copy.md")
     copy_if_exists(run_workspace.packet_path, run_workspace.context_dir / "07-execution-packet.md")
     copy_if_exists(paths["interaction_guide"], run_workspace.context_dir / "08-interaction-guide.md")
-    copy_if_exists(paths["output_example_md"], run_workspace.context_dir / "09-output-example.md")
-    copy_if_exists(paths["output_example_docx"], run_workspace.context_dir / "10-output-example.docx")
 
     write_text(
         run_workspace.stage_inputs_dir / "00-assignment-and-outline.md",
@@ -4849,8 +5291,13 @@ def write_subtopic_run_files(run_workspace: SubtopicRunWorkspace) -> None:
         {
             "generated_at": utc_now_iso(),
             "status": "subtopic_run_prepared",
-            "run_mode": "fresh-only",
+            "run_mode": run_workspace.run_mode,
+            "allowed_parts": list(run_workspace.allowed_parts),
+            "strict_lean_mode": run_workspace.strict_lean_mode,
+            "orchestration_target_percent": run_workspace.orchestration_target_percent,
             "artifact_profile": run_workspace.artifact_profile,
+            "packet_mode": run_workspace.packet_mode,
+            "packet_mode_reason": run_workspace.packet_mode_reason,
             "allow_reuse_stage_outputs": False,
             "theme_id": run_workspace.theme_workspace.theme.theme_id,
             "theme_title": run_workspace.theme_workspace.theme.full_title,
@@ -4997,7 +5444,14 @@ def default_workflow_paths(workspace_root: Path) -> dict[str, Path]:
     }
 
 
-def prepare_main_theme_workspace(workspace_root: Path, theme_query: str) -> MainThemeWorkspace:
+def prepare_main_theme_workspace(
+    workspace_root: Path,
+    theme_query: str,
+    packet_mode: str = DEFAULT_PACKET_MODE,
+    packet_mode_reason: str = "",
+) -> MainThemeWorkspace:
+    packet_mode = normalize_packet_mode(packet_mode)
+    packet_mode_reason = normalize_packet_mode_reason(packet_mode_reason)
     paths = default_workflow_paths(workspace_root)
     required = [
         "agents",
@@ -5059,6 +5513,8 @@ def prepare_main_theme_workspace(workspace_root: Path, theme_query: str) -> Main
         default_outline_entries=default_outline_entries,
         outline_entries=outline_entries,
         override_path=override_path,
+        packet_mode=packet_mode,
+        packet_mode_reason=packet_mode_reason,
     )
 
 
@@ -5839,9 +6295,48 @@ def collect_imported_topics(root: Path) -> list[Path]:
     return sorted(topics)
 
 
+def cmd_prepare_surgical_redo(args: argparse.Namespace) -> int:
+    workspace_root = Path(args.workspace_root).resolve()
+    allowed_parts = normalize_allowed_parts(args.parts)
+    if not allowed_parts:
+        raise RuntimeError("Surgical redo requires at least one allowed part.")
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root,
+        subtopic_id=args.subtopic_id,
+        theme_query=args.theme_query,
+        create_if_missing=False,
+    )
+    manifest_path = run_workspace.run_dir / "manifest.json"
+    manifest = load_json_if_exists(manifest_path) or {}
+    manifest["run_mode"] = RUN_MODE_SURGICAL
+    manifest["allowed_parts"] = list(allowed_parts)
+    manifest["strict_lean_mode"] = True
+    manifest["orchestration_target_percent"] = STRICT_ORCHESTRATION_TARGET_PERCENT
+    manifest["surgical_redo_reason"] = (args.reason or "").strip()
+    manifest["forbidden_operations"] = [
+        "run-subtopic",
+        "execute-part-01",
+        "assemble-subtopic-final",
+        "prepare-part-04-plan",
+        "prepare-part-05-plan",
+        "capture-part-04-range",
+        "capture-part-05-range",
+        "archive/cleanup/housekeeping inside the same run",
+        "full reread of unchanged canonical files",
+    ]
+    write_json(manifest_path, manifest)
+    print(run_workspace.run_dir)
+    return 0
+
+
 def cmd_prepare_main_theme(args: argparse.Namespace) -> int:
     workspace_root = Path(args.workspace_root).resolve()
-    workspace = prepare_main_theme_workspace(workspace_root, args.theme_query)
+    workspace = prepare_main_theme_workspace(
+        workspace_root,
+        args.theme_query,
+        packet_mode=args.packet_mode,
+        packet_mode_reason=args.packet_mode_reason,
+    )
     write_main_theme_context_files(workspace)
     write_outline_phase_files(workspace)
 
@@ -6003,6 +6498,8 @@ def cmd_run_subtopic(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
         artifact_profile=ARTIFACT_PROFILE_FULL if args.full_artifacts else ARTIFACT_PROFILE_LEAN,
+        packet_mode=args.packet_mode,
+        packet_mode_reason=args.packet_mode_reason,
     )
     write_subtopic_run_files(run_workspace)
     print(run_workspace.run_dir)
@@ -6016,6 +6513,7 @@ def cmd_execute_part_01(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "execute-part-01", part_number=1)
     output_path = run_workspace.stage_outputs_dir / "part-01.md"
     if output_path.exists() and not args.force:
         current = read_text(output_path)
@@ -6043,6 +6541,7 @@ def cmd_assemble_subtopic_final(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "assemble-subtopic-final")
     assembled_md = assemble_subtopic_final(run_workspace, publish=args.publish)
     print(assembled_md)
     return 0
@@ -6055,6 +6554,7 @@ def cmd_metric_check(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "metric-check")
     target = (args.target or "master").strip().lower()
     if target == "master":
         source_path = refresh_master_working_file(run_workspace)
@@ -6102,6 +6602,7 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
     part_number = int(args.part_number)
     if part_number < 1 or part_number > 11:
         raise RuntimeError("part_number must be between 1 and 11")
+    assert_run_command_allowed(run_workspace, "capture-part-output", part_number=part_number)
 
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(part_number, content)
@@ -6130,14 +6631,15 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
         status,
         source_origin="capture_part_output",
     )
-    refresh_dynamic_part_packets(run_workspace)
+    if not run_workspace.is_surgical_redo:
+        refresh_dynamic_part_packets(run_workspace)
     refresh_master_working_file(run_workspace)
     if part_number == 5:
         write_local_metric_checkpoint(run_workspace, "after_parts_02_05", target="master")
     elif part_number == 11:
         write_local_metric_checkpoint(run_workspace, "after_parts_02_11", target="master")
 
-    if part_number == 2 and args.auto_assemble:
+    if part_number == 2 and args.auto_assemble and not run_workspace.is_surgical_redo:
         assemble_subtopic_final(run_workspace, publish=False)
 
     print(output_path)
@@ -6151,15 +6653,18 @@ def cmd_prepare_part_02_web(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "prepare-part-02-web", part_number=2)
     plan_paths = write_part_02_web_plan(run_workspace, overwrite=args.force)
-    reasoning_paths = write_reasoning_layer(run_workspace, overwrite=args.force)
-    refresh_dynamic_part_packets(run_workspace)
+    reasoning_paths = None if run_workspace.is_surgical_redo else write_reasoning_layer(run_workspace, overwrite=args.force)
+    if not run_workspace.is_surgical_redo:
+        refresh_dynamic_part_packets(run_workspace)
     update_run_manifest_web_plan(run_workspace, plan_paths)
-    update_run_manifest_reasoning_layer(run_workspace, reasoning_paths)
-    if PRODUCTION_ENABLE_SEMANTIC_DEDUP:
+    if reasoning_paths is not None:
+        update_run_manifest_reasoning_layer(run_workspace, reasoning_paths)
+    if PRODUCTION_ENABLE_SEMANTIC_DEDUP and not run_workspace.is_surgical_redo:
         semantic_dedup_paths = write_semantic_dedup_layer(run_workspace, overwrite=args.force)
         update_run_manifest_semantic_dedup(run_workspace, semantic_dedup_paths)
-    if PRODUCTION_ENABLE_OMISSION_AUDIT:
+    if PRODUCTION_ENABLE_OMISSION_AUDIT and not run_workspace.is_surgical_redo:
         omission_paths = write_omission_audit_layer(run_workspace, overwrite=args.force)
         update_run_manifest_omission_audit(run_workspace, omission_paths)
     drop_disabled_manifest_layers(run_workspace)
@@ -6174,15 +6679,18 @@ def cmd_prepare_part_03_plan(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "prepare-part-03-plan", part_number=3)
     plan_paths = write_part_03_plan(run_workspace, overwrite=args.force)
-    reasoning_paths = write_reasoning_layer(run_workspace, overwrite=args.force)
-    refresh_dynamic_part_packets(run_workspace)
+    reasoning_paths = None if run_workspace.is_surgical_redo else write_reasoning_layer(run_workspace, overwrite=args.force)
+    if not run_workspace.is_surgical_redo:
+        refresh_dynamic_part_packets(run_workspace)
     update_run_manifest_part_03_plan(run_workspace, plan_paths)
-    update_run_manifest_reasoning_layer(run_workspace, reasoning_paths)
-    if PRODUCTION_ENABLE_SEMANTIC_DEDUP:
+    if reasoning_paths is not None:
+        update_run_manifest_reasoning_layer(run_workspace, reasoning_paths)
+    if PRODUCTION_ENABLE_SEMANTIC_DEDUP and not run_workspace.is_surgical_redo:
         semantic_dedup_paths = write_semantic_dedup_layer(run_workspace, overwrite=args.force)
         update_run_manifest_semantic_dedup(run_workspace, semantic_dedup_paths)
-    if PRODUCTION_ENABLE_OMISSION_AUDIT:
+    if PRODUCTION_ENABLE_OMISSION_AUDIT and not run_workspace.is_surgical_redo:
         omission_paths = write_omission_audit_layer(run_workspace, overwrite=args.force)
         update_run_manifest_omission_audit(run_workspace, omission_paths)
     drop_disabled_manifest_layers(run_workspace)
@@ -6197,6 +6705,7 @@ def cmd_capture_part_03_range(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "capture-part-03-range", part_number=3)
     segment = get_part_03_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(3, content)
@@ -6229,8 +6738,9 @@ def cmd_capture_part_03_range(args: argparse.Namespace) -> int:
             "completed",
             source_origin="capture_part_03_range",
         )
-    refresh_dynamic_part_packets(run_workspace)
-    if args.auto_assemble:
+    if not run_workspace.is_surgical_redo:
+        refresh_dynamic_part_packets(run_workspace)
+    if args.auto_assemble and not run_workspace.is_surgical_redo:
         assemble_subtopic_final(run_workspace, publish=False)
     print(segment_output_path)
     return 0
@@ -6243,6 +6753,7 @@ def cmd_prepare_part_04_plan(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "prepare-part-04-plan", part_number=4)
     plan_paths = write_part_04_plan(run_workspace, overwrite=args.force)
     update_run_manifest_part_04_plan(run_workspace, plan_paths)
     print(plan_paths["plan_dir"])
@@ -6256,6 +6767,7 @@ def cmd_capture_part_04_range(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "capture-part-04-range", part_number=4)
     segment = get_part_04_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(4, content)
@@ -6302,6 +6814,7 @@ def cmd_prepare_part_05_plan(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "prepare-part-05-plan", part_number=5)
     plan_paths = write_part_05_plan(run_workspace, overwrite=args.force)
     update_run_manifest_part_05_plan(run_workspace, plan_paths)
     print(plan_paths["plan_dir"])
@@ -6315,6 +6828,7 @@ def cmd_capture_part_05_range(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    assert_run_command_allowed(run_workspace, "capture-part-05-range", part_number=5)
     segment = get_part_05_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(5, content)
@@ -6425,6 +6939,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare_main_theme.add_argument("theme_query")
     prepare_main_theme.add_argument("--workspace-root", default=".")
+    prepare_main_theme.add_argument("--packet-mode", choices=[PACKET_MODE_LEAN, PACKET_MODE_LITERAL], default=DEFAULT_PACKET_MODE)
+    prepare_main_theme.add_argument("--packet-mode-reason", default="")
     prepare_main_theme.set_defaults(func=cmd_prepare_main_theme)
 
     run_subtopic = subparsers.add_parser(
@@ -6435,7 +6951,20 @@ def build_parser() -> argparse.ArgumentParser:
     run_subtopic.add_argument("--theme-query")
     run_subtopic.add_argument("--workspace-root", default=".")
     run_subtopic.add_argument("--full-artifacts", action="store_true")
+    run_subtopic.add_argument("--packet-mode", choices=[PACKET_MODE_LEAN, PACKET_MODE_LITERAL], default=DEFAULT_PACKET_MODE)
+    run_subtopic.add_argument("--packet-mode-reason", default="")
     run_subtopic.set_defaults(func=cmd_run_subtopic)
+
+    prepare_surgical_redo = subparsers.add_parser(
+        "prepare-surgical-redo",
+        help="Lock the latest warm run into strict surgical-redo mode for explicitly allowed parts only",
+    )
+    prepare_surgical_redo.add_argument("subtopic_id")
+    prepare_surgical_redo.add_argument("--parts", required=True, help="Comma-separated allowed parts, for example 2,3")
+    prepare_surgical_redo.add_argument("--reason", default="")
+    prepare_surgical_redo.add_argument("--theme-query")
+    prepare_surgical_redo.add_argument("--workspace-root", default=".")
+    prepare_surgical_redo.set_defaults(func=cmd_prepare_surgical_redo)
 
     execute_part_01 = subparsers.add_parser(
         "execute-part-01",
