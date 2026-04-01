@@ -4279,6 +4279,41 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
         if status_count < 3:
             issues.append("Part 5 should use explicit `Статус:` markers for the covered layers")
 
+    if part_number in {6, 7, 8, 9}:
+        first_nonempty = next((line.strip() for line in stripped.splitlines() if line.strip()), "")
+        normalized_first = first_nonempty.replace("**", "")
+        if normalized_first.startswith("ТЕМА:"):
+            issues.append(f"Part {part_number} output must not restart with `ТЕМА:`")
+        if "АНАЛИЗ ОБЛАСТИ ПРАВА" in stripped:
+            issues.append(f"Part {part_number} output must not restart the Part 2 analysis blocks")
+        if "A. РЕГУЛЯТОРНОЕ ЯДРО" in stripped or "B. ОПОРНЫЕ ДОКУМЕНТЫ" in stripped:
+            issues.append(f"Part {part_number} output must not reintroduce `A/B` sections from Part 2")
+        if "Прямой документ:" in stripped or "Прямые документы:" in stripped:
+            issues.append(
+                f"Part {part_number} output must use full document cards instead of grouped `Прямой документ(ы)` lines"
+            )
+
+        required_labels = [
+            "Вид документа:",
+            "Полное наименование:",
+            "Структурный элемент:",
+            "URL1:",
+            "URL2:",
+            "Статус верификации:",
+        ]
+        card_blocks = [
+            block.strip()
+            for block in re.split(r"(?m)(?=^(?:\d+\.\s+)?Вид документа:)", stripped)
+            if "Вид документа:" in block
+        ]
+        for index, block in enumerate(card_blocks, start=1):
+            for label in required_labels:
+                match = re.search(rf"(?m)^(?:\d+\.\s+)?{re.escape(label)}\s*(.*)$", block)
+                if not match:
+                    issues.append(f"Part {part_number} card #{index} is missing required field `{label}`")
+                elif not match.group(1).strip():
+                    issues.append(f"Part {part_number} card #{index} has empty required field `{label}`")
+
     if part_number == 10:
         items = extract_top_level_arabic_items(stripped)
         if not items:
