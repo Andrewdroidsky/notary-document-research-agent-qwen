@@ -4264,6 +4264,7 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
                 issues.append("Part 2 quarantine entries must include URL1")
             if not has_structural_element_marker(quarantine_block):
                 issues.append("Part 2 quarantine entries must include a structural element marker")
+        issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
 
     if part_number == 3:
         issues.extend(validate_part_03_canonical_structure(stripped))
@@ -4272,16 +4273,19 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
             issues.append(
                 "Part 3 is missing canonical VERSION 18 blocks: " + ", ".join(missing_blocks)
             )
+        issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
 
     if part_number == 4:
         status_count = stripped.count("Статус:")
         if status_count < 4:
             issues.append("Part 4 should use explicit `Статус:` markers for the covered authority/control blocks")
+        issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
 
     if part_number == 5:
         status_count = stripped.count("Статус:")
         if status_count < 3:
             issues.append("Part 5 should use explicit `Статус:` markers for the covered layers")
+        issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
 
     if part_number in {6, 7, 8, 9}:
         first_nonempty = next((line.strip() for line in stripped.splitlines() if line.strip()), "")
@@ -4317,6 +4321,7 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
                     issues.append(f"Part {part_number} card #{index} is missing required field `{label}`")
                 elif not match.group(1).strip():
                     issues.append(f"Part {part_number} card #{index} has empty required field `{label}`")
+        issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
 
     if part_number == 10:
         items = extract_top_level_arabic_items(stripped)
@@ -4330,6 +4335,7 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
                 )
             if not (10 <= len(items) <= 15):
                 issues.append(f"Part 10 must contain 10-15 numbered points; found: {len(items)}")
+        issues.extend(validate_part_10_item_level_url2(stripped))
 
     if part_number == 11:
         items = extract_top_level_arabic_items(stripped)
@@ -4352,6 +4358,42 @@ def extract_top_level_arabic_items(text: str) -> list[int]:
             items.append(int(match.group("number")))
     return items
 
+
+
+def split_document_blocks_by_full_name(text: str) -> list[str]:
+    full_name_label = "Полное наименование:"
+    pattern = rf"(?m)(?=^(?:\d+\.\s+)?{re.escape(full_name_label)})"
+    return [
+        block.strip()
+        for block in re.split(pattern, text)
+        if full_name_label in block
+    ]
+
+
+def validate_url2_presence_per_document_block(text: str, part_number: int) -> list[str]:
+    issues: list[str] = []
+    full_name_label = "Полное наименование:"
+    for index, block in enumerate(split_document_blocks_by_full_name(text), start=1):
+        if "URL2:" not in block:
+            issues.append(
+                f"Part {part_number} document block #{index} with `{full_name_label}` must contain `URL2:` in the same block"
+            )
+    return issues
+
+
+def split_numbered_part_10_items(text: str) -> list[str]:
+    pattern = re.compile(r"(?ms)^\s*\d+\.\s+.*?(?=^\s*\d+\.\s+|\Z)")
+    return [match.group(0).strip() for match in pattern.finditer(text)]
+
+
+def validate_part_10_item_level_url2(text: str) -> list[str]:
+    issues: list[str] = []
+    for index, item in enumerate(split_numbered_part_10_items(text), start=1):
+        if "URL2:" not in item:
+            issues.append(
+                f"Part 10 item #{index} must contain `URL2:` inside the same item; link blocks only at the end of the whole summary are not allowed"
+            )
+    return issues
 
 def extract_part_03_headings(text: str) -> list[tuple[str, str]]:
     headings: list[tuple[str, str]] = []
