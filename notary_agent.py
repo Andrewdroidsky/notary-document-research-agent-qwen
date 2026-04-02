@@ -4362,12 +4362,20 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
         status_count = stripped.count("Статус:")
         if status_count < 4:
             issues.append("Part 4 should use explicit `Статус:` markers for the covered authority/control blocks")
+        url2_count = count_url2_markers(stripped)
+        if status_count >= 3 and url2_count < 3:
+            issues.append(
+                f"Part 4 with at least 3 `Статус:` markers must contain at least 3 `URL2:` lines; found only {url2_count}"
+            )
         issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
 
     if part_number == 5:
         status_count = stripped.count("Статус:")
         if status_count < 3:
             issues.append("Part 5 should use explicit `Статус:` markers for the covered layers")
+        url2_count = count_url2_markers(stripped)
+        if status_count > 0 and url2_count == 0:
+            issues.append("Part 5 with `Статус:` markers must contain at least one `URL2:` line")
         issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
 
     if part_number in {6, 7, 8, 9}:
@@ -4462,6 +4470,10 @@ def validate_url2_presence_per_document_block(text: str, part_number: int) -> li
                 f"Part {part_number} document block #{index} with `{full_name_label}` must contain `URL2:` in the same block"
             )
     return issues
+
+
+def count_url2_markers(text: str) -> int:
+    return len(re.findall(r"(?m)^\s*URL2:\s*.+", text))
 
 
 def split_numbered_part_10_items(text: str) -> list[str]:
@@ -5076,6 +5088,8 @@ def update_run_manifest_part_status(
     part_number: int,
     status: str,
     source_origin: str | None = None,
+    validation_issues: list[str] | None = None,
+    validation_passed: bool | None = None,
 ) -> None:
     manifest_path = run_workspace.run_dir / "manifest.json"
     if not manifest_path.exists():
@@ -5087,6 +5101,10 @@ def update_run_manifest_part_status(
             part["updated_at"] = utc_now_iso()
             if source_origin is not None:
                 part["source_origin"] = source_origin
+            if validation_issues is not None:
+                part["validation_issues"] = list(validation_issues)
+            if validation_passed is not None:
+                part["validation_passed"] = bool(validation_passed)
             break
     write_json(manifest_path, manifest)
 
@@ -6879,6 +6897,13 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
         )
     issues = validate_part_output(run_workspace, part_number, content)
     if issues:
+        update_run_manifest_part_status(
+            run_workspace,
+            part_number,
+            "validation_failed",
+            validation_issues=issues,
+            validation_passed=False,
+        )
         raise RuntimeError("Part output validation failed:\n- " + "\n- ".join(issues))
 
     output_path = run_workspace.stage_outputs_dir / f"part-{part_number:02d}.md"
@@ -6895,6 +6920,8 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
         part_number,
         status,
         source_origin="capture_part_output",
+        validation_issues=[],
+        validation_passed=True,
     )
     if not run_workspace.is_surgical_redo:
         refresh_dynamic_part_packets(run_workspace)
