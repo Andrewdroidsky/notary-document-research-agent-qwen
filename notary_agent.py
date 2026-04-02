@@ -4273,6 +4273,7 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
             issues.append(
                 "Part 3 is missing canonical VERSION 18 blocks: " + ", ".join(missing_blocks)
             )
+        issues.extend(validate_part_03_applicable_blocks_have_url2(stripped))
         issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
 
     if part_number == 4:
@@ -4430,6 +4431,43 @@ def validate_part_03_canonical_structure(text: str) -> list[str]:
     return issues
 
 
+def split_part_03_blocks(text: str) -> list[tuple[str, str]]:
+    roman_pattern = "|".join(PART_03_CANONICAL_BLOCKS.keys())
+    pattern = re.compile(
+        rf"(?ms)^\s*(?P<roman>{roman_pattern})\.\s+.*?(?=^\s*(?:{roman_pattern})\.\s+|\Z)"
+    )
+    blocks: list[tuple[str, str]] = []
+    for match in pattern.finditer(text):
+        blocks.append((match.group("roman"), match.group(0).strip()))
+    return blocks
+
+
+def part_03_block_is_explicitly_not_applicable(block_text: str) -> bool:
+    lowered = block_text.lower()
+    negative_markers = [
+        "статус: не выявлено",
+        "не применяется",
+        "не применим",
+        "не применима",
+        "не применимо",
+        "не относится",
+        "не релевант",
+    ]
+    return any(marker in lowered for marker in negative_markers)
+
+
+def validate_part_03_applicable_blocks_have_url2(text: str) -> list[str]:
+    issues: list[str] = []
+    for roman, block in split_part_03_blocks(text):
+        if part_03_block_is_explicitly_not_applicable(block):
+            continue
+        if "URL2:" not in block:
+            issues.append(
+                f"Part 3 block `{roman}` is applicable to the theme and must contain at least one `URL2:` inside the same block"
+            )
+    return issues
+
+
 def validate_part_03_segment_output(text: str) -> list[str]:
     issues: list[str] = []
     stripped = text.strip()
@@ -4444,6 +4482,7 @@ def validate_part_03_segment_output(text: str) -> list[str]:
     if "A. РЕГУЛЯТОРНОЕ ЯДРО" in stripped or "B. ОПОРНЫЕ ДОКУМЕНТЫ" in stripped:
         issues.append("Part 3 range output must not reintroduce `A/B` sections from Part 2")
     issues.extend(validate_part_03_canonical_structure(stripped))
+    issues.extend(validate_part_03_applicable_blocks_have_url2(stripped))
     return issues
 
 
