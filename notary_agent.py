@@ -4432,6 +4432,8 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
         items = extract_top_level_arabic_items(stripped)
         if len(items) < 15:
             issues.append(f"Part 11 should contain an expanded practical-task list; found only {len(items)} numbered items")
+        if len(items) > 20:
+            issues.append(f"Part 11 exceeds maximum item count: {len(items)} items, max 20")
         if "URL1:" in stripped or "URL2:" in stripped or "VERIFIED URL2:" in stripped:
             issues.append("Part 11 must not contain document links")
 
