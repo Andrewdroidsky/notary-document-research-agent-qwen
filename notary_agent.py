@@ -250,6 +250,23 @@ FINAL_PART_TITLES = {
     11: "ПЕРЕЧЕНЬ ПРАКТИЧЕСКИХ ЗАДАНИЙ ПО ЗАДАННОЙ ТЕМЕ",
 }
 
+FOLLOWUP_SEARCH_MANDATE = """================================================================
+ОБЯЗАТЕЛЬНЫЙ ПОИСКОВЫЙ МАНДАТ ДЛЯ ДАННОЙ ЧАСТИ
+
+Ранее выданный список документов — стартовая точка, НЕ финальный перечень.
+Обязателен новый поисковый проход по каскаду источников (1→7):
+
+1) КонсультантПлюс https://www.consultant.ru/
+2) Гарант https://base.garant.ru/
+3) Норматив/Контур https://normativ.kontur.ru/
+4) https://legalacts.ru
+5) https://rulaws.ru
+6) https://xn--h1apee0d.xn--p1ai
+7) Далее — иные источники при необходимости.
+
+Правило: если после нового прохода новых документов не выявлено — зафиксировать явно: "новых документов по каскаду (1→7) не выявлено". Без нового прохода это заключение делать запрещено.
+================================================================"""
+
 FRESH_RUN_TRUSTED_SOURCE_ORIGINS = {
     "execute_part_01",
     "capture_part_output",
@@ -3231,6 +3248,8 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
         ]
     )
     packet_text = "\n".join(lines)
+    if part_number in (6, 7, 8):
+        packet_text += "\n\n" + FOLLOWUP_SEARCH_MANDATE
     guard_no_canonical_inline(packet_text)
     return packet_text
 
