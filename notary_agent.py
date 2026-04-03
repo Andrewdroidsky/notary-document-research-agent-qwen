@@ -5387,7 +5387,11 @@ def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) 
             raise RuntimeError(
                 "Cannot publish this run as fresh-only: untrusted stage outputs detected: " + issues
             )
-        enforce_publish_metric_floor(final_markdown)
+        enforce_publish_metric_floor(
+            final_markdown,
+            run_workspace=run_workspace,
+            included_parts=included_parts,
+        )
         write_text(run_workspace.final_md_target, final_markdown)
         replace_docx_body_with_text(
             run_workspace.theme_workspace.paths["output_example_docx"],
@@ -6244,7 +6248,22 @@ def collect_publish_metric_shortfalls(metrics: dict[str, int]) -> list[str]:
     return shortfalls
 
 
-def enforce_publish_metric_floor(text: str) -> dict[str, int]:
+def enforce_publish_metric_floor(
+    text: str,
+    run_workspace: SubtopicRunWorkspace | None = None,
+    included_parts: list[int] | None = None,
+) -> dict[str, int]:
+    if run_workspace is not None:
+        parts_to_check = included_parts or list(range(2, 12))
+        untrusted_parts = collect_untrusted_output_parts(run_workspace, parts_to_check)
+        if untrusted_parts:
+            issues = ", ".join(
+                f"Part {item['part_number']} ({item['source_origin']})"
+                for item in untrusted_parts
+            )
+            raise RuntimeError(
+                "Cannot publish final output: untrusted stage outputs detected: " + issues
+            )
     metrics = compute_text_metrics(text)
     shortfalls = collect_publish_metric_shortfalls(metrics)
     if shortfalls:
