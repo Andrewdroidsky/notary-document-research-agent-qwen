@@ -5330,7 +5330,12 @@ def sanitize_substantive_part_output(run_workspace: SubtopicRunWorkspace, part_n
     return sanitized + "\n"
 
 
-def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) -> Path:
+def assemble_subtopic_final(
+    run_workspace: SubtopicRunWorkspace,
+    publish: bool,
+    *,
+    force: bool = False,
+) -> Path:
     assembled_blocks: list[str] = []
     included_parts: list[int] = []
     skipped_stub_parts: list[int] = []
@@ -5407,6 +5412,7 @@ def assemble_subtopic_final(run_workspace: SubtopicRunWorkspace, publish: bool) 
             final_markdown,
             run_workspace=run_workspace,
             included_parts=included_parts,
+            force=force,
         )
         write_text(run_workspace.final_md_target, final_markdown)
         replace_docx_body_with_text(
@@ -6251,11 +6257,15 @@ def compute_text_metrics(text: str) -> dict[str, int]:
     }
 
 
-def collect_publish_metric_shortfalls(metrics: dict[str, int]) -> list[str]:
+def collect_publish_metric_shortfalls(
+    metrics: dict[str, int],
+    *,
+    skip_words_chars: bool = False,
+) -> list[str]:
     shortfalls: list[str] = []
-    if metrics["words"] < PUBLISH_MIN_WORDS:
+    if not skip_words_chars and metrics["words"] < PUBLISH_MIN_WORDS:
         shortfalls.append(f"words<{PUBLISH_MIN_WORDS}")
-    if metrics["chars"] < PUBLISH_MIN_CHARS:
+    if not skip_words_chars and metrics["chars"] < PUBLISH_MIN_CHARS:
         shortfalls.append(f"chars<{PUBLISH_MIN_CHARS}")
     if metrics["url1"] < PUBLISH_MIN_URL1:
         shortfalls.append(f"url1<{PUBLISH_MIN_URL1}")
@@ -6268,6 +6278,8 @@ def enforce_publish_metric_floor(
     text: str,
     run_workspace: SubtopicRunWorkspace | None = None,
     included_parts: list[int] | None = None,
+    *,
+    force: bool = False,
 ) -> dict[str, int]:
     if run_workspace is not None:
         parts_to_check = included_parts or list(range(2, 12))
@@ -6281,7 +6293,10 @@ def enforce_publish_metric_floor(
                 "Cannot publish final output: untrusted stage outputs detected: " + issues
             )
     metrics = compute_text_metrics(text)
-    shortfalls = collect_publish_metric_shortfalls(metrics)
+    shortfalls = collect_publish_metric_shortfalls(
+        metrics,
+        skip_words_chars=force,
+    )
     if shortfalls:
         raise RuntimeError(
             "Метрики не достигнуты: "
@@ -6850,10 +6865,13 @@ def cmd_assemble_subtopic_final(args: argparse.Namespace) -> int:
     )
     assert_run_command_allowed(run_workspace, "assemble-subtopic-final")
     if args.publish:
-        assembled_md = assemble_subtopic_final(run_workspace, publish=False)
+        assembled_md = assemble_subtopic_final(run_workspace, publish=False, force=bool(args.force))
         assembled_text = read_text(assembled_md)
         metrics = compute_text_metrics(assembled_text)
-        shortfalls = collect_publish_metric_shortfalls(metrics)
+        shortfalls = collect_publish_metric_shortfalls(
+            metrics,
+            skip_words_chars=bool(args.force),
+        )
         pre_publish_payload = {
             "subtopic_id": run_workspace.subtopic_entry.item_id,
             "target": "pre-publish",
@@ -6872,11 +6890,20 @@ def cmd_assemble_subtopic_final(args: argparse.Namespace) -> int:
             },
             "publish_ready": not bool(shortfalls),
             "shortfalls": shortfalls,
+            "force": bool(args.force),
         }
         print(json.dumps(pre_publish_payload, ensure_ascii=False, indent=2))
         if shortfalls:
-            enforce_publish_metric_floor(assembled_text)
-    assembled_md = assemble_subtopic_final(run_workspace, publish=args.publish)
+            enforce_publish_metric_floor(
+                assembled_text,
+                run_workspace=run_workspace,
+                force=bool(args.force),
+            )
+    assembled_md = assemble_subtopic_final(
+        run_workspace,
+        publish=args.publish,
+        force=bool(args.force),
+    )
     if args.publish:
         theme_number = run_workspace.theme_workspace.theme.theme_id
         current_subtopic_id = run_workspace.subtopic_entry.item_id
@@ -7335,6 +7362,11 @@ def build_parser() -> argparse.ArgumentParser:
     assemble_subtopic_final_parser.add_argument("--theme-query")
     assemble_subtopic_final_parser.add_argument("--workspace-root", default=".")
     assemble_subtopic_final_parser.add_argument("--publish", action="store_true")
+    assemble_subtopic_final_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow publish below words/chars thresholds, but still enforce url1/url2 and trust gates",
+    )
     assemble_subtopic_final_parser.set_defaults(func=cmd_assemble_subtopic_final)
 
     metric_check = subparsers.add_parser(
