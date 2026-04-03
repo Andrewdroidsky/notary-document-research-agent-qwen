@@ -4443,8 +4443,11 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
                 issues.append(
                     f"Part 10 must use continuous numbering starting from 1 without restarts or gaps; found: {items}"
                 )
-            if not (10 <= len(items) <= 15):
-                issues.append(f"Part 10 must contain 10-15 numbered points; found: {len(items)}")
+            if not (5 <= len(items) <= 10):
+                issues.append(f"Part 10 must contain 5-10 numbered points; found: {len(items)}")
+        part10_words = len(text.split())
+        if part10_words > 2500:
+            issues.append(f"Part 10 is too long: {part10_words} words, max 2500")
         issues.extend(validate_part_10_item_level_url2(stripped))
 
     if part_number == 11:
