@@ -17,11 +17,11 @@ Use this skill when:
 
 Read in this order:
 
-1. `C:\Users\koper\OneDrive\Documents\New project\AGENTS.md`
-2. `C:\Users\koper\OneDrive\Documents\New project\PROJECT_STATE.md`
-3. `C:\Users\koper\OneDrive\Documents\New project\input\workflow\manual-workflow.md`
-4. `C:\Users\koper\OneDrive\Documents\New project\input\workflow\Утверждаю.md`
-5. `C:\Users\koper\OneDrive\Documents\New project\input\workflow\outline overrides\<номер темы>.md` if it exists
+1. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\AGENTS.md`
+2. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\PROJECT_STATE.md`
+3. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\manual-workflow.md`
+4. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\Утверждаю.md`
+5. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\outline overrides\<номер темы>.md` if it exists
 
 ## Workflow
 

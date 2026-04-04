@@ -3631,7 +3631,7 @@ def build_part_03_readme(run_workspace: SubtopicRunWorkspace) -> str:
 
 def build_part_03_operator_sequence(run_workspace: SubtopicRunWorkspace) -> str:
     paths = build_part_03_plan_paths(run_workspace)
-    capture_file = Path("C:/Users/koper/OneDrive/Documents/New project/part-03-capture.md")
+    capture_file = Path("C:/Users/koper/Downloads/GitHub Projects/Notary Qwen/part-03-capture.md")
     lines = [
         f"# Operator Sequence Part 03: {run_workspace.subtopic_entry.line}",
         "",
@@ -4050,6 +4050,57 @@ def prepare_subtopic_run_workspace(
         render_orders=True,
         artifact_profile=artifact_profile,
     )
+
+
+def get_stage_outputs_status(run_workspace: SubtopicRunWorkspace) -> dict[int, str]:
+    """Проверяет ФАКТИЧЕСКОЕ состояние файлов в 02-stage-outputs.
+    
+    Возвращает dict: {номер_части: 'present' | 'absent'}
+    Это ОБЯЗАТЕЛЬНАЯ проверка перед любым действием по подтеме.
+    Агент не должен полагаться на память или предположения — только факты.
+    """
+    status: dict[int, str] = {}
+    stage_dir = run_workspace.stage_outputs_dir
+    if not stage_dir.exists():
+        return {i: "absent" for i in range(1, 12)}
+    for part_num in range(1, 12):
+        part_file = stage_dir / f"part-{part_num:02d}.md"
+        if part_file.exists():
+            content = read_text(part_file)
+            if is_response_stub(content):
+                status[part_num] = "absent"
+            else:
+                status[part_num] = "present"
+        else:
+            status[part_num] = "absent"
+    return status
+
+
+def report_stage_outputs_status(status: dict[int, str]) -> None:
+    """Выводит отчёт о фактическом состоянии stage-outputs."""
+    present = [p for p, s in status.items() if s == "present"]
+    absent = [p for p, s in status.items() if s == "absent"]
+    print(f"STAGE-OUTPUTS STATUS: Части {present} — захвачены; Части {absent} — отсутствуют.")
+
+
+def require_stage_part_not_present(run_workspace: SubtopicRunWorkspace, part_number: int, command: str) -> None:
+    """Защищает от повторной работы над уже захваченной частью."""
+    status = get_stage_outputs_status(run_workspace)
+    if status.get(part_number) == "present":
+        raise RuntimeError(
+            f"BLOCKED: Часть {part_number} уже захвачена в stage-outputs (статус: present). "
+            f"Команда '{command}' не требуется — переходите к Части {min(p for p, s in status.items() if s == 'absent') if any(s == 'absent' for s in status.values()) else 'все завершены'}."
+        )
+
+
+def require_stage_part_present(run_workspace: SubtopicRunWorkspace, part_number: int, command: str) -> None:
+    """Защищает от работы с ещё не захваченной частью."""
+    status = get_stage_outputs_status(run_workspace)
+    if status.get(part_number) != "present":
+        raise RuntimeError(
+            f"BLOCKED: Часть {part_number} ещё не захвачена в stage-outputs (статус: absent). "
+            f"Команда '{command}' требует наличия Части {part_number}. Сначала захватите её."
+        )
 
 
 def ensure_subtopic_run_workspace(
@@ -4768,7 +4819,7 @@ def build_part_04_readme(run_workspace: SubtopicRunWorkspace) -> str:
 
 def build_part_04_operator_sequence(run_workspace: SubtopicRunWorkspace) -> str:
     paths = build_part_04_plan_paths(run_workspace)
-    capture_file = Path("C:/Users/koper/OneDrive/Documents/New project/part-04-capture.md")
+    capture_file = Path("C:/Users/koper/Downloads/GitHub Projects/Notary Qwen/part-04-capture.md")
     lines = [
         f"# Operator Sequence Part 04: {run_workspace.subtopic_entry.line}",
         "",
@@ -5004,7 +5055,7 @@ def build_part_05_readme(run_workspace: SubtopicRunWorkspace) -> str:
 
 def build_part_05_operator_sequence(run_workspace: SubtopicRunWorkspace) -> str:
     paths = build_part_05_plan_paths(run_workspace)
-    capture_file = Path("C:/Users/koper/OneDrive/Documents/New project/part-05-capture.md")
+    capture_file = Path("C:/Users/koper/Downloads/GitHub Projects/Notary Qwen/part-05-capture.md")
     lines = [
         f"# Operator Sequence Part 05: {run_workspace.subtopic_entry.line}",
         "",
@@ -6105,13 +6156,16 @@ def is_structural_heading(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return False
-    if stripped.startswith("ЧАСТЬ "):
+    clean = stripped.replace("**", "")
+    if clean.startswith("ЧАСТЬ "):
         return True
-    if stripped.startswith("ТЕМА:"):
+    if clean.startswith("ТЕМА:"):
         return True
-    if stripped in PROMINENT_INNER_HEADINGS:
+    if clean in PROMINENT_INNER_HEADINGS:
         return True
-    if re.match(r"^[IVXLCDM]+\.\s", stripped):
+    if re.match(r"^[IVXLCDM]+\.\s", clean):
+        return True
+    if re.match(r"^\d+\.\s+[A-ZА-ЯЁ\u0410-\u042F]", clean):
         return True
     return False
 
@@ -6835,6 +6889,10 @@ def cmd_execute_part_01(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
+    require_stage_part_not_present(run_workspace, 1, "execute-part-01")
     assert_run_command_allowed(run_workspace, "execute-part-01", part_number=1)
     output_path = run_workspace.stage_outputs_dir / "part-01.md"
     if output_path.exists() and not args.force:
@@ -6863,6 +6921,9 @@ def cmd_assemble_subtopic_final(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "assemble-subtopic-final")
     if args.publish:
         assembled_md = assemble_subtopic_final(run_workspace, publish=False, force=bool(args.force))
@@ -6971,6 +7032,10 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
     part_number = int(args.part_number)
     if part_number < 1 or part_number > 11:
         raise RuntimeError("part_number must be between 1 and 11")
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
+    require_stage_part_not_present(run_workspace, part_number, "capture-part-output")
     assert_run_command_allowed(run_workspace, "capture-part-output", part_number=part_number)
 
     content = load_part_output_source(args.source_file, args.clipboard)
@@ -7017,6 +7082,10 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
     elif part_number == 11:
         write_local_metric_checkpoint(run_workspace, "after_parts_02_11", target="master")
 
+    # Обновлённый статус после захвата
+    new_status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(new_status)
+
     if part_number == 2 and args.auto_assemble and not run_workspace.is_surgical_redo:
         assemble_subtopic_final(run_workspace, publish=False)
 
@@ -7031,6 +7100,9 @@ def cmd_prepare_part_02_web(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "prepare-part-02-web", part_number=2)
     plan_paths = write_part_02_web_plan(run_workspace, overwrite=args.force)
     reasoning_paths = None if run_workspace.is_surgical_redo else write_reasoning_layer(run_workspace, overwrite=args.force)
@@ -7057,6 +7129,9 @@ def cmd_prepare_part_03_plan(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "prepare-part-03-plan", part_number=3)
     plan_paths = write_part_03_plan(run_workspace, overwrite=args.force)
     reasoning_paths = None if run_workspace.is_surgical_redo else write_reasoning_layer(run_workspace, overwrite=args.force)
@@ -7083,6 +7158,9 @@ def cmd_capture_part_03_range(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "capture-part-03-range", part_number=3)
     segment = get_part_03_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)
@@ -7131,6 +7209,9 @@ def cmd_prepare_part_04_plan(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "prepare-part-04-plan", part_number=4)
     plan_paths = write_part_04_plan(run_workspace, overwrite=args.force)
     update_run_manifest_part_04_plan(run_workspace, plan_paths)
@@ -7145,6 +7226,9 @@ def cmd_capture_part_04_range(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "capture-part-04-range", part_number=4)
     segment = get_part_04_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)
@@ -7192,6 +7276,9 @@ def cmd_prepare_part_05_plan(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "prepare-part-05-plan", part_number=5)
     plan_paths = write_part_05_plan(run_workspace, overwrite=args.force)
     update_run_manifest_part_05_plan(run_workspace, plan_paths)
@@ -7206,6 +7293,9 @@ def cmd_capture_part_05_range(args: argparse.Namespace) -> int:
         subtopic_id=args.subtopic_id,
         theme_query=args.theme_query,
     )
+    # ПРАВИЛО: всегда проверять фактическое состояние stage-outputs перед действием
+    status = get_stage_outputs_status(run_workspace)
+    report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "capture-part-05-range", part_number=5)
     segment = get_part_05_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)

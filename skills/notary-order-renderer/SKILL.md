@@ -17,9 +17,9 @@ Use this skill when:
 
 Read in this order:
 
-1. `C:\Users\koper\OneDrive\Documents\New project\AGENTS.md`
-2. `C:\Users\koper\OneDrive\Documents\New project\PROJECT_STATE.md`
-3. `C:\Users\koper\OneDrive\Documents\New project\input\order\Текст приказа 18  15.11.10..md`
+1. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\AGENTS.md`
+2. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\PROJECT_STATE.md`
+3. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\order\Текст приказа 18  15.11.10..md`
 4. `outline.active.md`
 5. current main theme and current final subtopic
 

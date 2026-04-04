@@ -16,11 +16,11 @@ Use this skill when:
 
 Read in this order:
 
-1. `C:\Users\koper\OneDrive\Documents\New project\AGENTS.md`
-2. `C:\Users\koper\OneDrive\Documents\New project\PROJECT_STATE.md`
-3. `C:\Users\koper\OneDrive\Documents\New project\input\master prompt\Промпт по поиску документов 18.md`
+1. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\AGENTS.md`
+2. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\PROJECT_STATE.md`
+3. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\master prompt\Промпт по поиску документов 18.md`
 4. rendered order copy for the current final subtopic
-5. `C:\Users\koper\OneDrive\Documents\New project\input\workflow\User and LLM Interaction in LLM Contest Window.md`
+5. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\User and LLM Interaction in LLM Contest Window.md`
 6. accepted output examples
 
 ## Execution Rhythm
