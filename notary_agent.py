@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import html.parser
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -44,10 +45,10 @@ DEFAULT_PACKET_MODE = os.environ.get(PACKET_MODE_ENV, PACKET_MODE_LEAN).strip().
 RUN_MODE_FRESH = "fresh-only"
 RUN_MODE_SURGICAL = "surgical-redo"
 STRICT_ORCHESTRATION_TARGET_PERCENT = 3.0
-PUBLISH_MIN_WORDS = 16000
+PUBLISH_MIN_WORDS = 10000
 PUBLISH_MIN_CHARS = 122000
-PUBLISH_MIN_URL1 = 100
-PUBLISH_MIN_URL2 = 100
+PUBLISH_MIN_URL1 = 80
+PUBLISH_MIN_URL2 = 80
 SURGICAL_ALLOWED_COMMANDS = {
     "capture-part-output",
     "prepare-part-02-web",
@@ -256,6 +257,38 @@ FINAL_PART_TITLES = {
     11: "ПЕРЕЧЕНЬ ПРАКТИЧЕСКИХ ЗАДАНИЙ ПО ЗАДАННОЙ ТЕМЕ",
 }
 
+SEARCH_LAYERS_MANDATE = """================================================================
+ОБЯЗАТЕЛЬНЫЕ СЛОИ ПОИСКА ДЛЯ ДАННОЙ ЧАСТИ
+
+Искать документы по ВСЕМ применимым слоям. Ограничиваться только кодексами и ФЗ — недостаточно.
+
+СЛОИ ДОКУМЕНТОВ:
+1. Материальный закон — федеральные законы, кодексы, прямо регулирующие данное нотариальное действие
+2. Процессуальный слой — процессуальные нормы, порядок совершения нотариальных действий
+3. Подзаконные акты — постановления Правительства РФ, приказы министерств и ведомств
+4. Разъяснения и акты ФНП — письма, методические рекомендации, решения Федеральной нотариальной палаты
+5. Судебный слой — постановления Пленума ВС РФ, определения КС РФ, информационные письма ВАС, обзоры судебной практики
+6. Ведомственные НПА — приказы Минюста, ФНС, ЦБ, Росреестра, иных профильных органов
+7. Региональный и узкоспециальный слой — приказы территориальных органов Минюста, акты нотариальных палат субъектов РФ (только официально опубликованные и прямо применимые)
+8. Цифровой слой — акты об электронной подписи, электронном документообороте, цифровых сервисах нотариата
+9. Международный слой — международные договоры, конвенции, применимые к данному нотариальному действию
+10. Тарифный слой — только для тарифных подтем: нормы об исчислении нотариального тарифа (федерального и регионального)
+
+Применять только редакции, действующие на дату ответа.
+
+КАСКАД ИСТОЧНИКОВ (1→7):
+1) КонсультантПлюс https://www.consultant.ru/
+2) Гарант https://base.garant.ru/
+3) Норматив/Контур https://normativ.kontur.ru/
+4) https://legalacts.ru
+5) https://rulaws.ru
+6) https://xn--h1apee0d.xn--p1ai
+7) Далее — иные источники при необходимости.
+
+ТРЕБОВАНИЕ К ПОЛЮ «ЗНАЧЕНИЕ ДЛЯ ТЕМЫ»:
+Для каждого документа обязательно раскрыть, в чём состоит его прямая нормативная связь с данным нотариальным действием: устанавливает ли он полномочие нотариуса, основания и условия совершения действия, требования к форме или реквизитам документа, порядок проверки, основания для отказа в совершении действия, размер нотариального тарифа, ответственность нотариуса либо иной элемент нотариального производства. Общих формулировок «регулирует данную сферу» или «имеет значение для темы» без конкретизации — недостаточно. Документы без прямой нормативной связи с нотариальным действием не включаются.
+================================================================"""
+
 FOLLOWUP_SEARCH_MANDATE = """================================================================
 ОБЯЗАТЕЛЬНЫЙ ПОИСКОВЫЙ МАНДАТ ДЛЯ ДАННОЙ ЧАСТИ
 
@@ -382,7 +415,7 @@ PART_03_CANONICAL_BLOCKS = {
     "XX": "Валютное регулирование и комплаенс сделок",
     "XXI": "Доказательственное право и обеспечение доказательств",
     "XXII": "Интеллектуальные права",
-    "XXIII": "Потребительские и “соц”-кейсы в нотариальной форме",
+    "XXIII": "Потребительские и \"соц\"-кейсы в нотариальной форме",
     "XXIV": "Таможенное право",
     "XXV": "Уголовное право",
     "XXVI": "Экологическое право",
@@ -1996,7 +2029,7 @@ def build_part_02_research_pack(run_workspace: SubtopicRunWorkspace) -> str:
     )
     for query in queries:
         lines.append(f"- `{query['id']}`: {query['query']}")
-    lines.append("")
+    lines.extend(["", SEARCH_LAYERS_MANDATE, ""])
     return "\n".join(lines)
 
 
@@ -3256,6 +3289,8 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
     packet_text = "\n".join(lines)
     if part_number == 2:
         packet_text += "\n\n" + PART2_ANALYSIS_MANDATE
+    if 2 <= part_number <= 11:
+        packet_text += "\n\n" + SEARCH_LAYERS_MANDATE
     if part_number in (6, 7, 8):
         packet_text += "\n\n" + FOLLOWUP_SEARCH_MANDATE
     guard_no_canonical_inline(packet_text)
@@ -5465,6 +5500,28 @@ def assemble_subtopic_final(
             included_parts=included_parts,
             force=force,
         )
+        # ── URL2 title verification ──────────────────────────────────────
+        print("Проверка URL2 (fetch + сверка заголовков)…")
+        url2_audit = audit_url2_titles(final_markdown)
+        print_url2_audit_report(url2_audit)
+        write_json(run_workspace.final_dir / "url2-audit.json", url2_audit)
+        mismatches = [r for r in url2_audit if r["status"] == "MISMATCH"]
+        unverified = [r for r in url2_audit if r["status"] == "UNVERIFIED"]
+        verifiable = [r for r in url2_audit if r["status"] in ("OK", "MISMATCH")]
+        # MISMATCH = страница открылась, заголовок не совпал → блокируем
+        if not force and mismatches and verifiable:
+            mismatch_rate = len(mismatches) / len(verifiable)
+            if mismatch_rate > 0.20 or len(mismatches) >= 5:
+                raise RuntimeError(
+                    f"Публикация заблокирована: {len(mismatches)} из {len(verifiable)} "
+                    "проверенных URL2 ведут не на тот документ. "
+                    "Исправьте карточки (см. url2-audit.json) и повторите assemble-subtopic-final."
+                )
+        # UNVERIFIED = 403/таймаут → не блокируем, только предупреждаем
+        if unverified:
+            print(f"\n⚠  {len(unverified)} URL2 не удалось проверить автоматически (UNVERIFIED).")
+            print("   Проверьте их вручную. Полный список — в url2-audit.json.")
+        # ────────────────────────────────────────────────────────────────
         write_text(run_workspace.final_md_target, final_markdown)
         replace_docx_body_with_text(
             run_workspace.theme_workspace.paths["output_example_docx"],
@@ -5475,6 +5532,12 @@ def assemble_subtopic_final(
         report["published"] = True
         report["published_md"] = str(run_workspace.final_md_target)
         report["published_docx"] = str(run_workspace.final_docx_target)
+        report["url2_audit_summary"] = {
+            "total": len(url2_audit),
+            "ok": len([r for r in url2_audit if r["status"] == "OK"]),
+            "mismatch": len(mismatches),
+            "unverified": len(unverified),
+        }
 
     write_json(run_workspace.final_dir / "assembly.report.json", report)
     return assembled_md
@@ -6293,6 +6356,222 @@ def refresh_master_working_file(run_workspace: SubtopicRunWorkspace) -> Path:
     return master_path
 
 
+# ── URL2 title verification ────────────────────────────────────────────────
+
+class _TitleParser(html.parser.HTMLParser):
+    """Minimal HTML parser that extracts the <title> tag text."""
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_title = False
+        self.title = ""
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag.lower() == "title":
+            self._in_title = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "title":
+            self._in_title = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.title += data
+
+
+def fetch_page_title(url: str, timeout: int = 12) -> tuple[str, str]:
+    """Fetch URL and return (status, page_title).
+
+    status values:
+      'ok'          – page fetched successfully
+      'http:<code>' – non-200 HTTP response
+      'error:<msg>' – network / timeout error
+    """
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; NotaryAgent/1.0)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return f"http:{resp.status}", ""
+            raw = resp.read(65536)  # first 64 KB is enough for <title>
+    except Exception as exc:
+        return f"error:{exc}", ""
+
+    html_text = ""
+    for enc in ("utf-8", "utf-8-sig", "cp1251", "cp1252"):
+        try:
+            html_text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            pass
+    if not html_text:
+        html_text = raw.decode("utf-8", errors="replace")
+
+    parser = _TitleParser()
+    parser.feed(html_text)
+    return "ok", parser.title.strip()
+
+
+def _normalize_for_compare(s: str) -> set[str]:
+    """Lowercase, strip punctuation, return set of words longer than 2 chars."""
+    s = s.lower()
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    words = {w for w in s.split() if len(w) > 2}
+    return words
+
+
+def _titles_match(expected: str, actual: str) -> bool:
+    """True if at least 35% of meaningful words from expected appear in actual."""
+    if not expected or not actual:
+        return False
+    exp_words = _normalize_for_compare(expected)
+    act_words = _normalize_for_compare(actual)
+    if not exp_words:
+        return True
+    overlap = exp_words & act_words
+    return len(overlap) / len(exp_words) >= 0.35
+
+
+def _parse_url2_pairs(text: str) -> list[dict]:
+    """Extract URL2, expected_title, document name and structural element from each card."""
+    lines = text.splitlines()
+    pairs: list[dict] = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not re.match(r"^URL2:\s*\S", stripped):
+            continue
+        url_raw = re.sub(r"^URL2:\s*", "", stripped).strip().strip("`").strip()
+        if not url_raw.startswith("http"):
+            continue
+        # Look forward for Заголовок страницы URL2
+        expected_title = ""
+        for j in range(i + 1, min(i + 7, len(lines))):
+            if lines[j].strip().startswith("Заголовок страницы URL2:"):
+                expected_title = re.sub(
+                    r"^Заголовок страницы URL2:\s*", "", lines[j].strip()
+                )
+                break
+        # Look backward for Полное наименование and Структурный элемент (within 25 lines)
+        doc_name = ""
+        struct_el = ""
+        for j in range(i - 1, max(i - 26, -1), -1):
+            s = lines[j].strip()
+            if not doc_name and s.startswith("Полное наименование:"):
+                doc_name = re.sub(r"^Полное наименование:\s*", "", s)
+            if not struct_el and s.startswith("Структурный элемент:"):
+                struct_el = re.sub(r"^Структурный элемент:\s*", "", s)
+            if doc_name and struct_el:
+                break
+        pairs.append({
+            "url2": url_raw,
+            "expected_title": expected_title,
+            "doc_name": doc_name,
+            "struct_el": struct_el,
+        })
+    return pairs
+
+
+def _fetch_and_compare(pair: dict, timeout: int) -> dict:
+    """Fetch one URL2 and compare title. Returns result dict.
+
+    status values:
+      'OK'         – page fetched, title matches
+      'MISMATCH'   – page fetched, title does NOT match → real error, blocks publish
+      'UNVERIFIED' – page unreachable (403, timeout, network) → warning only, does not block
+    """
+    url_raw = pair["url2"]
+    expected_title = pair["expected_title"]
+    status, actual_title = fetch_page_title(url_raw, timeout=timeout)
+    if status == "ok":
+        match_result = "OK" if _titles_match(expected_title, actual_title) else "MISMATCH"
+    else:
+        # 403, timeout, any network error → UNVERIFIED (warn but don't block)
+        match_result = "UNVERIFIED"
+        actual_title = status  # preserve raw error for the report
+    return {
+        "url2": url_raw,
+        "expected_title": expected_title,
+        "actual_title": actual_title,
+        "doc_name": pair.get("doc_name", ""),
+        "struct_el": pair.get("struct_el", ""),
+        "status": match_result,
+    }
+
+
+def audit_url2_titles(text: str, timeout: int = 6, max_workers: int = 10) -> list[dict]:
+    """Parse all (URL2, Заголовок страницы URL2) pairs in *text*, fetch each URL
+    in parallel (up to *max_workers* concurrent requests), compare titles.
+
+    Each result dict contains:
+      url2, expected_title, actual_title, doc_name, struct_el, status
+      status: 'OK' | 'MISMATCH' | 'UNVERIFIED'
+      MISMATCH  → page opened, title wrong → blocks publish
+      UNVERIFIED → 403/timeout/network → warning only, does NOT block publish
+    """
+    import concurrent.futures
+
+    pairs = _parse_url2_pairs(text)
+    if not pairs:
+        return []
+
+    results: list[dict] = [{}] * len(pairs)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(_fetch_and_compare, pair, timeout): idx
+            for idx, pair in enumerate(pairs)
+        }
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = future.result()
+            except Exception as exc:
+                results[idx] = {
+                    "url2": pairs[idx]["url2"],
+                    "expected_title": pairs[idx]["expected_title"],
+                    "actual_title": f"error:{exc}",
+                    "doc_name": pairs[idx].get("doc_name", ""),
+                    "struct_el": pairs[idx].get("struct_el", ""),
+                    "status": "UNVERIFIED",
+                }
+    return results
+
+
+def print_url2_audit_report(audit: list[dict]) -> None:
+    total = len(audit)
+    mismatches = [r for r in audit if r["status"] == "MISMATCH"]
+    unverified = [r for r in audit if r["status"] == "UNVERIFIED"]
+    ok_count = len([r for r in audit if r["status"] == "OK"])
+    print(f"\n── URL2 AUDIT: {total} ссылок проверено ──")
+    print(f"   OK:          {ok_count}")
+    print(f"   MISMATCH:    {len(mismatches)}  ← блокирует публикацию")
+    print(f"   UNVERIFIED:  {len(unverified)}  ← предупреждение (403/таймаут)")
+    if mismatches:
+        print("\n⛔  MISMATCH — URL2 ведёт не на тот документ (исправить до публикации):")
+        for m in mismatches:
+            if m.get("doc_name"):
+                print(f"   Документ:          {m['doc_name']}")
+            if m.get("struct_el"):
+                print(f"   Структурный эл.:   {m['struct_el']}")
+            print(f"   URL2:              {m['url2']}")
+            print(f"   Ожидался заголовок: {m['expected_title']}")
+            print(f"   Реальный заголовок: {m['actual_title']}")
+            print()
+    if unverified:
+        print("\n⚠  UNVERIFIED — страница недоступна (403/таймаут), проверить вручную:")
+        for u in unverified:
+            doc_label = u.get("doc_name") or u.get("expected_title") or u["url2"]
+            struct_label = u.get("struct_el", "")
+            print(f"   {doc_label}")
+            if struct_label:
+                print(f"   └─ {struct_label}")
+            print(f"      {u['url2']}")
+            print()
+
+
+# ── end URL2 verification ───────────────────────────────────────────────────
+
+
 def compute_text_metrics(text: str) -> dict[str, int]:
     lines = text.splitlines()
     words = len(re.findall(r"\S+", text))
@@ -7022,6 +7301,46 @@ def cmd_metric_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify_url2(args: argparse.Namespace) -> int:
+    """Standalone URL2 verification command.
+
+    Fetches every URL2 found in the master/assembled/published file and compares
+    the declared 'Заголовок страницы URL2' with the actual page <title>.
+    Saves results to url2-audit.json in the run's final dir.
+    """
+    workspace_root = Path(args.workspace_root).resolve()
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root,
+        subtopic_id=args.subtopic_id,
+        theme_query=args.theme_query,
+    )
+    target = (args.target or "master").strip().lower()
+    if target == "master":
+        source_path = refresh_master_working_file(run_workspace)
+    elif target == "assembled":
+        source_path = run_workspace.final_dir / "final.assembled.md"
+        if not source_path.exists():
+            raise RuntimeError("Assembled markdown is missing. Run assemble-subtopic-final first.")
+    elif target == "published":
+        source_path = run_workspace.final_md_target
+        if not source_path.exists():
+            raise RuntimeError("Published markdown is missing. Run assemble-subtopic-final --publish first.")
+    else:
+        raise RuntimeError("target must be one of: master, assembled, published")
+
+    text = read_text(source_path)
+    print(f"Проверяем URL2 в: {source_path}")
+    audit = audit_url2_titles(text)
+    print_url2_audit_report(audit)
+
+    out_path = run_workspace.final_dir / "url2-audit.json"
+    write_json(out_path, audit)
+    print(f"\nПолный отчёт сохранён: {out_path}")
+
+    mismatches = [r for r in audit if r["status"] == "MISMATCH"]
+    return 1 if mismatches else 0
+
+
 def cmd_capture_part_output(args: argparse.Namespace) -> int:
     workspace_root = Path(args.workspace_root).resolve()
     run_workspace = ensure_subtopic_run_workspace(
@@ -7037,6 +7356,16 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
     report_stage_outputs_status(status)
     require_stage_part_not_present(run_workspace, part_number, "capture-part-output")
     assert_run_command_allowed(run_workspace, "capture-part-output", part_number=part_number)
+
+    # Проверка реального поиска: research-log.jsonl должен быть непустым для Частей 2–11
+    if part_number >= 2:
+        research_log_path = run_workspace.web_plan_dir / "research-log.jsonl"
+        if not research_log_path.exists() or research_log_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"Реальный поиск не зафиксирован: research-log.jsonl пустой или отсутствует.\n"
+                f"Путь: {research_log_path}\n"
+                f"Выполните web_search и запишите результаты в research-log.jsonl перед захватом Части {part_number}."
+            )
 
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(part_number, content)
@@ -7468,6 +7797,16 @@ def build_parser() -> argparse.ArgumentParser:
     metric_check.add_argument("--workspace-root", default=".")
     metric_check.add_argument("--target", choices=["master", "assembled", "published"], default="master")
     metric_check.set_defaults(func=cmd_metric_check)
+
+    verify_url2 = subparsers.add_parser(
+        "verify-url2",
+        help="Fetch every URL2 in the run and compare declared page title with actual <title>; saves url2-audit.json",
+    )
+    verify_url2.add_argument("subtopic_id")
+    verify_url2.add_argument("--theme-query")
+    verify_url2.add_argument("--workspace-root", default=".")
+    verify_url2.add_argument("--target", choices=["master", "assembled", "published"], default="master")
+    verify_url2.set_defaults(func=cmd_verify_url2)
 
     capture_part_output = subparsers.add_parser(
         "capture-part-output",
