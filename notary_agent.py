@@ -47,8 +47,13 @@ RUN_MODE_SURGICAL = "surgical-redo"
 STRICT_ORCHESTRATION_TARGET_PERCENT = 3.0
 PUBLISH_MIN_WORDS = 10000
 PUBLISH_MIN_CHARS = 122000
-PUBLISH_MIN_URL1 = 80
-PUBLISH_MIN_URL2 = 80
+# URL1 is advisory-only — quantity pressure drives hallucination (documented 07.04.2026).
+PUBLISH_TARGET_URL1 = 45
+PUBLISH_MIN_URL1 = PUBLISH_TARGET_URL1  # alias for manifest JSON readers
+# URL2: hard floor (blocks publish) + separate advisory target.
+# Floor=35 restores a meaningful quality gate without the hallucination pressure of 80.
+PUBLISH_MIN_URL2 = 35
+PUBLISH_TARGET_URL2 = 50  # advisory goal, logged as warning above the floor
 SURGICAL_ALLOWED_COMMANDS = {
     "capture-part-output",
     "prepare-part-02-web",
@@ -306,12 +311,43 @@ FOLLOWUP_SEARCH_MANDATE = """===================================================
 Правило: если после нового прохода новых документов не выявлено — зафиксировать явно: "новых документов по каскаду (1→7) не выявлено". Без нового прохода это заключение делать запрещено.
 ================================================================"""
 
+WEBFETCH_MANDATE = """================================================================
+ОБЯЗАТЕЛЬНЫЙ МАНДАТ: WEB_FETCH ДО КАЖДОЙ КАРТОЧКИ
+
+ЗАПРЕЩЕНО писать карточку документа без предшествующего реального web_fetch.
+
+Порядок работы для каждого поискового блока — строго:
+1. Написать запрос прямо в тексте ответа: >>> ПОИСК: "запрос"
+2. Выполнить web_search / web_fetch — получить реальный результат страницы
+3. Написать прямо в тексте ответа: Продолжаю верификацию через web_fetch.
+4. Только после этого — написать карточку на основе реального результата
+
+Эти маркеры (>>> ПОИСК и "Продолжаю верификацию через web_fetch") должны
+присутствовать ВНУТРИ текста Части — не как отдельные сообщения в чат,
+а прямо в теле ответа между блоками карточек. Они попадают в захват и
+проверяются автоматически. Отсутствие маркеров = блокировка захвата.
+
+Обязательная первая строка данной Части (сразу после строки ТЕМА:):
+[WEBFETCH-ДЕКЛАРАЦИЯ] Начинаю поиск документов по теме. Все URL2 получаю через
+web_fetch с реальных страниц. Ни одна ссылка не будет сконструирована из памяти модели.
+
+Обязательный последний блок данной Части:
+[WEBFETCH-ПОДТВЕРЖДЕНИЕ] Все URL2 в данной Части получены через web_fetch с реальных
+страниц источников. Каждая ссылка соответствует полному наименованию документа
+и структурному элементу, указанным в карточке. Ни одна ссылка не сконструирована
+и не взята из памяти модели.
+================================================================"""
+
 FRESH_RUN_TRUSTED_SOURCE_ORIGINS = {
     "execute_part_01",
     "capture_part_output",
     "capture_part_03_range",
     "capture_part_04_range",
     "capture_part_05_range",
+    # Level 3: Grounded session results are grounded in real web searches — trusted.
+    "grounded_research_session",
+    # Level 3+4: API-session results are produced by real tool calls — trusted.
+    "api_research_session",
 }
 
 PROMINENT_INNER_HEADINGS = {
@@ -2219,6 +2255,8 @@ def build_part_02_launch_packet(run_workspace: SubtopicRunWorkspace) -> str:
     lines.extend(
         [
             "",
+            WEBFETCH_MANDATE,
+            "",
             "## Требование к ответу",
             "",
             "Верни только готовый ответ по Части 2 без пояснений вне структуры ответа.",
@@ -3289,6 +3327,8 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
     packet_text = "\n".join(lines)
     if part_number == 2:
         packet_text += "\n\n" + PART2_ANALYSIS_MANDATE
+    if 2 <= part_number <= 9:
+        packet_text += "\n\n" + WEBFETCH_MANDATE
     if 2 <= part_number <= 11:
         packet_text += "\n\n" + SEARCH_LAYERS_MANDATE
     if part_number in (6, 7, 8):
@@ -3746,6 +3786,8 @@ def build_part_03_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
             "## Что вернуть",
             "",
             "Вернуть только ответ по этому диапазону Части 3 без перезапуска Части 2 и без перехода к следующему диапазону.",
+            "",
+            WEBFETCH_MANDATE,
             "",
         ]
     )
@@ -4995,6 +5037,84 @@ def verify_and_annotate_url2_titles(content: str) -> tuple[str, list[str]]:
     return full_text, summary_lines
 
 
+# ---------------------------------------------------------------------------
+# Level 2 — Commitment protocol: search-before-card enforcement
+# ---------------------------------------------------------------------------
+
+SEARCH_DECLARATION_RE = re.compile(
+    r"(?:"
+    r">>>\s*ПОИСК"                                    # >>> ПОИСК: "запрос"
+    r"|>>>\s*SEARCH"                                   # >>> SEARCH: "query"
+    r"|\[ПОИСК\s*(?:#\d+)?\]"                        # [ПОИСК #3]
+    r"|WEB_SEARCH\s*[:(]"                             # WEB_SEARCH:
+    r"|web_search\s*\("                               # web_search(
+    r"|Запрос\s+#\d+\s*:"                            # Запрос #5:
+    r"|Продолжаю\s+верификацию\s+через\s+web_fetch"  # inline progress marker
+    r")",
+    re.IGNORECASE,
+)
+
+
+def check_search_grounding(content: str, part_number: int) -> list[str]:
+    """
+    Level 2 defense — commitment protocol. Strict 1:1 enforcement.
+
+    Every document card (URL1:) must have a corresponding search/progress marker
+    ('>>> ПОИСК:' or 'Продолжаю верификацию через web_fetch') in the Part text.
+    search_count < card_count → hard block. No exceptions.
+    """
+    if part_number < 2 or part_number > 9:
+        return []
+    card_count = content.count("URL1:")
+    if card_count == 0:
+        return []
+    search_count = len(SEARCH_DECLARATION_RE.findall(content))
+    if search_count < card_count:
+        return [
+            f"[grounding-check] БЛОК Часть {part_number}: "
+            f"{card_count} карточек, {search_count} маркеров поиска. "
+            f"Требуется 1:1 — каждая карточка должна быть предварена маркером "
+            f"'>>> ПОИСК: ...' или 'Продолжаю верификацию через web_fetch'. "
+            f"Не хватает {card_count - search_count} маркеров. "
+            f"Переработать Часть: каждый документ — только после реального web_fetch."
+        ]
+    return []
+
+
+WEBFETCH_DECLARATION_RE = re.compile(r"\[WEBFETCH-ДЕКЛАРАЦИЯ\]", re.IGNORECASE)
+WEBFETCH_CONFIRMATION_RE = re.compile(r"\[WEBFETCH-ПОДТВЕРЖДЕНИЕ\]", re.IGNORECASE)
+
+
+def check_webfetch_protocol(content: str, part_number: int) -> list[str]:
+    """Hard blocking check for Parts 2–9.
+
+    The packet mandates two markers:
+    - [WEBFETCH-ДЕКЛАРАЦИЯ]  — opening: agent declares all URL2 come from real web_fetch.
+    - [WEBFETCH-ПОДТВЕРЖДЕНИЕ] — closing: agent confirms all links were fetched, not fabricated.
+
+    Their absence means Qwen ignored the mandate. This is a hard block, not advisory.
+    """
+    if part_number < 2 or part_number > 9:
+        return []
+    errors = []
+    if not WEBFETCH_DECLARATION_RE.search(content):
+        errors.append(
+            f"[webfetch-protocol] БЛОК Часть {part_number}: "
+            "отсутствует [WEBFETCH-ДЕКЛАРАЦИЯ]. "
+            "Агент обязан открыть Часть объявлением о web_fetch до первой карточки. "
+            "Переработать Часть с нуля, соблюдая мандат."
+        )
+    if not WEBFETCH_CONFIRMATION_RE.search(content):
+        errors.append(
+            f"[webfetch-protocol] БЛОК Часть {part_number}: "
+            "отсутствует [WEBFETCH-ПОДТВЕРЖДЕНИЕ]. "
+            "Агент обязан завершить Часть подтверждением: все URL2 получены через web_fetch, "
+            "каждая ссылка соответствует наименованию документа и структурному элементу. "
+            "Переработать Часть с нуля, соблюдая мандат."
+        )
+    return errors
+
+
 def validate_url2_presence_per_document_block(text: str, part_number: int) -> list[str]:
     issues: list[str] = []
     full_name_label = "Полное наименование:"
@@ -5353,6 +5473,8 @@ def build_part_04_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
             "",
             "Вернуть только ответ по этому диапазону Части 4 без перезапуска предыдущих частей и без перехода к следующему диапазону.",
             "",
+            WEBFETCH_MANDATE,
+            "",
         ]
     )
     return "\n".join(lines)
@@ -5569,6 +5691,8 @@ def build_part_05_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
             "## Что вернуть",
             "",
             "Вернуть только ответ по этому диапазону Части 5 без перезапуска предыдущих частей и без перехода к следующему диапазону.",
+            "",
+            WEBFETCH_MANDATE,
             "",
         ]
     )
@@ -6904,6 +7028,44 @@ def _fetch_and_compare(pair: dict, timeout: int) -> dict:
     }
 
 
+def check_url2_title_audit_at_capture(content: str, part_number: int) -> list[str]:
+    """Capture-time URL2 title audit (Parts 2–9).
+
+    Fetches every URL2 in the Part text and compares the actual page <title>
+    with the declared 'Заголовок страницы URL2'. MISMATCH = wrong document →
+    RuntimeError (hard block). UNVERIFIED = 403/timeout → warning only.
+    """
+    if part_number < 2 or part_number > 9:
+        return []
+    audit = audit_url2_titles(content)
+    if not audit:
+        return []
+    mismatches = [r for r in audit if r["status"] == "MISMATCH"]
+    unverified = [r for r in audit if r["status"] == "UNVERIFIED"]
+    ok_count = len([r for r in audit if r["status"] == "OK"])
+    print(f"\n── Capture URL2 AUDIT Часть {part_number}: {len(audit)} ссылок ──")
+    print(f"   OK: {ok_count}  MISMATCH: {len(mismatches)}  UNVERIFIED: {len(unverified)}")
+    if unverified:
+        print(f"⚠  UNVERIFIED (403/таймаут) — {len(unverified)} ссылок недоступны автоматически:")
+        for u in unverified:
+            print(f"   {u.get('doc_name') or u['url2']}")
+    errors = []
+    if mismatches:
+        lines = [
+            f"[url2-title-audit] БЛОК Часть {part_number}: {len(mismatches)} URL2 ведут не на тот документ. "
+            f"Исправить карточки и повторить capture."
+        ]
+        for m in mismatches:
+            lines.append(
+                f"  Документ: {m.get('doc_name', '?')}\n"
+                f"  URL2: {m['url2']}\n"
+                f"  Ожидался заголовок: {m['expected_title']}\n"
+                f"  Реальный заголовок: {m['actual_title']}"
+            )
+        errors.append("\n".join(lines))
+    return errors
+
+
 def audit_url2_titles(text: str, timeout: int = 6, max_workers: int = 10) -> list[dict]:
     """Parse all (URL2, Заголовок страницы URL2) pairs in *text*, fetch each URL
     in parallel (up to *max_workers* concurrent requests), compare titles.
@@ -7038,16 +7200,36 @@ def collect_publish_metric_shortfalls(
     *,
     skip_words_chars: bool = False,
 ) -> list[str]:
+    """Hard blocking shortfalls — words/chars + URL2 floor.
+    URL1 count is advisory-only (see collect_publish_metric_advisories).
+    URL2 floor=35 is a quality gate; pressure of 80 drove hallucination (documented 07.04.2026).
+    """
     shortfalls: list[str] = []
     if not skip_words_chars and metrics["words"] < PUBLISH_MIN_WORDS:
         shortfalls.append(f"words<{PUBLISH_MIN_WORDS}")
     if not skip_words_chars and metrics["chars"] < PUBLISH_MIN_CHARS:
         shortfalls.append(f"chars<{PUBLISH_MIN_CHARS}")
-    if metrics["url1"] < PUBLISH_MIN_URL1:
-        shortfalls.append(f"url1<{PUBLISH_MIN_URL1}")
     if metrics["url2"] < PUBLISH_MIN_URL2:
         shortfalls.append(f"url2<{PUBLISH_MIN_URL2}")
     return shortfalls
+
+
+def collect_publish_metric_advisories(metrics: dict[str, int]) -> list[str]:
+    """Advisory URL count checks — printed as warnings but do NOT block publish.
+    Real documents at lower count beat hallucinated documents at target count.
+    """
+    advisories: list[str] = []
+    if metrics["url1"] < PUBLISH_TARGET_URL1:
+        advisories.append(
+            f"[advisory] URL1={metrics['url1']} (цель ≥{PUBLISH_TARGET_URL1}). "
+            "Ниже целевого — это предупреждение, публикация не блокируется."
+        )
+    if metrics["url2"] < PUBLISH_TARGET_URL2:
+        advisories.append(
+            f"[advisory] URL2={metrics['url2']} (цель ≥{PUBLISH_TARGET_URL2}). "
+            "Ниже целевого — это предупреждение, публикация не блокируется."
+        )
+    return advisories
 
 
 def enforce_publish_metric_floor(
@@ -7081,6 +7263,9 @@ def enforce_publish_metric_floor(
             f"{metrics['url2']} URL2. "
             "Требуется добор документов."
         )
+    advisories = collect_publish_metric_advisories(metrics)
+    for adv in advisories:
+        print(adv)
     return metrics
 
 
@@ -7824,6 +8009,17 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
 
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(part_number, content)
+
+    # WebFetch protocol: hard block if mandatory declaration/confirmation markers are missing.
+    webfetch_errors = check_webfetch_protocol(content, part_number)
+    if webfetch_errors:
+        raise RuntimeError("\n".join(webfetch_errors))
+
+    # Level 2 — commitment protocol: block if cards exist without search/progress markers.
+    grounding_errors = check_search_grounding(content, part_number)
+    if grounding_errors:
+        raise RuntimeError("\n".join(grounding_errors))
+
     foreign_subtopic_ids = find_foreign_subtopic_ids(content, run_workspace.subtopic_entry.item_id)
     if foreign_subtopic_ids:
         raise RuntimeError(
@@ -7847,6 +8043,11 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
             validation_passed=False,
         )
         raise RuntimeError("Part output validation failed:\n- " + "\n- ".join(issues))
+
+    # Capture-time title audit: MISMATCH → hard block, UNVERIFIED → warning.
+    title_audit_errors = check_url2_title_audit_at_capture(content, part_number)
+    if title_audit_errors:
+        raise RuntimeError("\n".join(title_audit_errors))
 
     # Живая верификация URL2: Python сам открывает каждую ссылку и сравнивает
     # реальный <title> страницы с тем что агент написал в «Заголовок страницы URL2».
@@ -7968,9 +8169,28 @@ def cmd_capture_part_03_range(args: argparse.Namespace) -> int:
     status = get_stage_outputs_status(run_workspace)
     report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "capture-part-03-range", part_number=3)
+    research_log_path = run_workspace.web_plan_dir / "research-log.jsonl"
+    d2_issues = check_tmp_generator_scripts(workspace_root)
+    if d2_issues:
+        raise RuntimeError("\n".join(d2_issues))
+    d3_issues = check_research_log_timestamp_clustering(research_log_path)
+    if d3_issues:
+        raise RuntimeError("\n".join(d3_issues))
+    d1_issues = check_research_log_url_authenticity(research_log_path)
+    if d1_issues:
+        raise RuntimeError("\n".join(d1_issues))
     segment = get_part_03_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(3, content)
+    webfetch_errors = check_webfetch_protocol(content, 3)
+    if webfetch_errors:
+        raise RuntimeError("\n".join(webfetch_errors))
+    grounding_errors = check_search_grounding(content, 3)
+    if grounding_errors:
+        raise RuntimeError("\n".join(grounding_errors))
+    url2_issues = validate_url2_against_research_log(content, research_log_path)
+    if url2_issues:
+        raise RuntimeError("\n".join(url2_issues))
     foreign_subtopic_ids = find_foreign_subtopic_ids(content, run_workspace.subtopic_entry.item_id)
     if foreign_subtopic_ids:
         raise RuntimeError(
@@ -7980,6 +8200,9 @@ def cmd_capture_part_03_range(args: argparse.Namespace) -> int:
     issues = validate_part_03_segment_output(content)
     if issues:
         raise RuntimeError("Part 3 range validation failed:\n- " + "\n- ".join(issues))
+    title_audit_errors = check_url2_title_audit_at_capture(content, 3)
+    if title_audit_errors:
+        raise RuntimeError("\n".join(title_audit_errors))
 
     segment_output_path = get_part_03_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
@@ -8036,9 +8259,28 @@ def cmd_capture_part_04_range(args: argparse.Namespace) -> int:
     status = get_stage_outputs_status(run_workspace)
     report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "capture-part-04-range", part_number=4)
+    research_log_path = run_workspace.web_plan_dir / "research-log.jsonl"
+    d2_issues = check_tmp_generator_scripts(workspace_root)
+    if d2_issues:
+        raise RuntimeError("\n".join(d2_issues))
+    d3_issues = check_research_log_timestamp_clustering(research_log_path)
+    if d3_issues:
+        raise RuntimeError("\n".join(d3_issues))
+    d1_issues = check_research_log_url_authenticity(research_log_path)
+    if d1_issues:
+        raise RuntimeError("\n".join(d1_issues))
     segment = get_part_04_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(4, content)
+    webfetch_errors = check_webfetch_protocol(content, 4)
+    if webfetch_errors:
+        raise RuntimeError("\n".join(webfetch_errors))
+    grounding_errors = check_search_grounding(content, 4)
+    if grounding_errors:
+        raise RuntimeError("\n".join(grounding_errors))
+    url2_issues = validate_url2_against_research_log(content, research_log_path)
+    if url2_issues:
+        raise RuntimeError("\n".join(url2_issues))
     foreign_subtopic_ids = find_foreign_subtopic_ids(content, run_workspace.subtopic_entry.item_id)
     if foreign_subtopic_ids:
         raise RuntimeError(
@@ -8048,6 +8290,9 @@ def cmd_capture_part_04_range(args: argparse.Namespace) -> int:
     issues = validate_part_04_segment_output(content)
     if issues:
         raise RuntimeError("Part 4 range validation failed:\n- " + "\n- ".join(issues))
+    title_audit_errors = check_url2_title_audit_at_capture(content, 4)
+    if title_audit_errors:
+        raise RuntimeError("\n".join(title_audit_errors))
 
     segment_output_path = get_part_04_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
@@ -8103,9 +8348,28 @@ def cmd_capture_part_05_range(args: argparse.Namespace) -> int:
     status = get_stage_outputs_status(run_workspace)
     report_stage_outputs_status(status)
     assert_run_command_allowed(run_workspace, "capture-part-05-range", part_number=5)
+    research_log_path = run_workspace.web_plan_dir / "research-log.jsonl"
+    d2_issues = check_tmp_generator_scripts(workspace_root)
+    if d2_issues:
+        raise RuntimeError("\n".join(d2_issues))
+    d3_issues = check_research_log_timestamp_clustering(research_log_path)
+    if d3_issues:
+        raise RuntimeError("\n".join(d3_issues))
+    d1_issues = check_research_log_url_authenticity(research_log_path)
+    if d1_issues:
+        raise RuntimeError("\n".join(d1_issues))
     segment = get_part_05_segment(int(args.segment_id))
     content = load_part_output_source(args.source_file, args.clipboard)
     content = normalize_part_output(5, content)
+    webfetch_errors = check_webfetch_protocol(content, 5)
+    if webfetch_errors:
+        raise RuntimeError("\n".join(webfetch_errors))
+    grounding_errors = check_search_grounding(content, 5)
+    if grounding_errors:
+        raise RuntimeError("\n".join(grounding_errors))
+    url2_issues = validate_url2_against_research_log(content, research_log_path)
+    if url2_issues:
+        raise RuntimeError("\n".join(url2_issues))
     foreign_subtopic_ids = find_foreign_subtopic_ids(content, run_workspace.subtopic_entry.item_id)
     if foreign_subtopic_ids:
         raise RuntimeError(
@@ -8115,6 +8379,9 @@ def cmd_capture_part_05_range(args: argparse.Namespace) -> int:
     issues = validate_part_05_segment_output(content)
     if issues:
         raise RuntimeError("Part 5 range validation failed:\n- " + "\n- ".join(issues))
+    title_audit_errors = check_url2_title_audit_at_capture(content, 5)
+    if title_audit_errors:
+        raise RuntimeError("\n".join(title_audit_errors))
 
     segment_output_path = get_part_05_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
@@ -8139,6 +8406,903 @@ def cmd_capture_part_05_range(args: argparse.Namespace) -> int:
     if args.auto_assemble:
         assemble_subtopic_final(run_workspace, publish=False)
     print(segment_output_path)
+    return 0
+
+
+# ================================================================
+# Level 3 — Grounded research session (one search, one card)
+#
+# Architecture:
+#   Orchestrator executes REAL web searches via urllib.
+#   Real results are injected into the Qwen prompt.
+#   Qwen writes cards ONLY for documents present in the real results.
+#   Hallucination is structurally impossible:
+#     the model writes only about what it actually sees in context.
+#
+# No API key required. Works with existing Qwen Code CLI workflow.
+#
+# Workflow:
+#   1. prepare-grounded-session 16.X.X
+#   2. grounded-search-packet 16.X.X --query-id q01  (paste into Qwen)
+#   3. capture-grounded-cards 16.X.X --query-id q01 --source-file result.md
+#   4. repeat 2–3 for each query
+#   5. assemble-grounded-part 16.X.X --part 2
+# ================================================================
+
+GROUNDED_DIR_NAME = "06-grounded"
+
+GROUNDED_PACKET_TEMPLATE = """\
+ЗАДАЧА: Один поисковый запрос → карточки только из реальных результатов.
+
+Тема подтемы: {subtopic_title}
+Запрос оркестратора {query_id}: «{query}»
+Цель запроса: {purpose}
+
+РЕАЛЬНЫЕ РЕЗУЛЬТАТЫ ПОИСКА (выполнен orchestrator в {timestamp}):
+================================================================
+{search_results_text}
+================================================================
+
+ИНСТРУКЦИЯ (обязательно):
+1. Прочитай результаты поиска выше.
+2. Для каждого применимого к теме документа выполни web_fetch по URL из результатов.
+3. Заполни карточку ТОЛЬКО на основе реального web_fetch — не из памяти модели.
+4. Поле «Заголовок страницы URL2» — только из реального <title> страницы.
+5. Если в результатах нет применимых документов — напиши: РЕЗУЛЬТАТОВ НЕТ: {query}
+6. Не добавляй документов, которых нет в результатах выше.
+
+ОБЯЗАТЕЛЬНЫЙ МАРКЕР ПЕРЕД КАРТОЧКАМИ:
+>>> ПОИСК: «{query}» ({query_id})
+
+ФОРМАТ КАЖДОЙ КАРТОЧКИ:
+№{card_start}:
+Вид документа: ...
+Полное наименование: ...
+Структурный элемент: ...
+URL1: https://publication.pravo.gov.ru/...
+URL2: https://www.consultant.ru/...
+VERIFIED URL2: ДА
+Заголовок страницы URL2: [реальный <title> из web_fetch]
+Статус верификации: A / B / КАРАНТИН
+Значение для темы: [конкретно, почему важен для темы «{subtopic_title}»]
+"""
+
+
+def _grounded_dir(run_workspace: SubtopicRunWorkspace, part_number: int = 2) -> Path:
+    session_key = f"part{part_number:02d}"
+    return run_workspace.run_dir / GROUNDED_DIR_NAME / session_key
+
+
+def _grounded_session_path(run_workspace: SubtopicRunWorkspace, part_number: int = 2) -> Path:
+    return _grounded_dir(run_workspace, part_number) / "session.json"
+
+
+def _build_grounded_queries(
+    run_workspace: SubtopicRunWorkspace,
+    part_number: int,
+) -> list[dict]:
+    """
+    Build a list of grounded search queries for the given part.
+
+    Each part has its own natural query source:
+      Part 2  — queries.json (prepare-part-02-web)
+      Part 3  — PART_03_CANONICAL_BLOCKS (I–XXXVII search spheres)
+      Part 4  — PART_04_CONTROL_POINTS (government organs)
+      Part 5  — Legal layer types (кодексный, подзаконный, ведомственный…)
+      Parts 6–9 — Follow-up gap queries based on subtopic + part focus
+      Parts 10–11 — No new search (synthesis parts); returns empty list.
+
+    Works for any subtopic_id. The subtopic title is used as the base
+    for query construction in Parts 3–9.
+    """
+    title = run_workspace.subtopic_entry.title.rstrip(".")
+
+    if part_number == 2:
+        # Primary source: pre-generated queries from prepare-part-02-web.
+        queries_path = run_workspace.web_plan_dir / "queries.json"
+        if not queries_path.exists():
+            raise RuntimeError(
+                f"queries.json not found at {queries_path}. "
+                "Run prepare-part-02-web first to generate queries for Part 2."
+            )
+        raw = json.loads(queries_path.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, list) else raw.get("queries", [])
+
+    elif part_number == 3:
+        # One query per canonical search sphere (I–XXXVII).
+        queries = []
+        for roman, sphere_name in PART_03_CANONICAL_BLOCKS.items():
+            queries.append({
+                "id": f"p3_{roman.lower()}",
+                "purpose": f"canonical_block_{roman}",
+                "query": f"{title} {sphere_name}",
+                "preferred_domains": ["pravo.gov.ru", "consultant.ru", "garant.ru"],
+                "notes": f"Блок {roman}. {sphere_name}",
+            })
+        return queries
+
+    elif part_number == 4:
+        # One query per government organ / authority.
+        queries = []
+        for i, organ in enumerate(PART_04_CONTROL_POINTS, start=1):
+            queries.append({
+                "id": f"p4_o{i:02d}",
+                "purpose": "gov_organ",
+                "query": f"{title} {organ}",
+                "preferred_domains": ["pravo.gov.ru", "consultant.ru", "garant.ru"],
+                "notes": f"Орган: {organ}",
+            })
+        return queries
+
+    elif part_number == 5:
+        # Legal layer types.
+        layers = [
+            ("кодексный", "кодексы ГК ГПК АПК УПК НК"),
+            ("профильный", "основы законодательства нотариате профильный закон"),
+            ("подзаконный", "постановление правительство приказ министерство"),
+            ("ведомственный", "приказ Минюст ФНП нотариальная палата"),
+            ("судебный", "постановление пленум ВС РФ разъяснение судебная практика"),
+            ("международный", "конвенция договор апостиль международный"),
+            ("цифровой", "электронная подпись ЭЦП ЕИС нотариат цифровой"),
+            ("специальный субъектный", "иностранный гражданин недееспособный юридическое лицо"),
+        ]
+        return [
+            {
+                "id": f"p5_l{i:02d}",
+                "purpose": f"layer_{label}",
+                "query": f"{title} {keywords}",
+                "preferred_domains": ["pravo.gov.ru", "consultant.ru", "garant.ru"],
+                "notes": f"Слой: {label}",
+            }
+            for i, (label, keywords) in enumerate(layers, start=1)
+        ]
+
+    elif part_number in (6, 7, 8, 9):
+        # Follow-up / gap / delta queries.
+        part_focuses = {
+            6: [
+                ("filter_gaps", "нотариус требования условия основания"),
+                ("filter_prohibitions", "нотариус запрет ограничение отказ"),
+                ("filter_digital", "нотариус электронный цифровой удалённый"),
+                ("filter_international", "нотариус международный иностранный апостиль"),
+                ("filter_recent", "нотариус изменение поправка редакция 2023 2024 2025"),
+            ],
+            7: [
+                ("new_docs_federal", f"{title} федеральный закон постановление"),
+                ("new_docs_ministry", f"{title} приказ Минюст Минфин ФНС"),
+                ("new_docs_fnp", f"{title} ФНП нотариальная палата методические рекомендации"),
+                ("new_docs_court", f"{title} постановление пленум ВС разъяснение"),
+                ("new_docs_recent", f"{title} 2023 2024 2025"),
+            ],
+            8: [
+                ("federal_delta_basic", f"{title} федеральный закон основы нотариата"),
+                ("federal_delta_gk", f"{title} Гражданский кодекс статья"),
+                ("federal_delta_nk", f"{title} Налоговый кодекс тариф пошлина"),
+                ("federal_delta_amendments", f"{title} изменения поправки федеральный закон"),
+            ],
+            9: [
+                ("audit_gaps", f"{title} нотариус пробел упущенное"),
+                ("audit_practice", f"{title} судебная практика ошибки нарушения"),
+                ("audit_contradictions", f"{title} противоречие коллизия норм"),
+                ("audit_new", f"{title} новое актуальное 2024 2025"),
+            ],
+        }
+        focuses = part_focuses.get(part_number, [])
+        return [
+            {
+                "id": f"p{part_number}_{purpose}",
+                "purpose": purpose,
+                "query": query,
+                "preferred_domains": ["pravo.gov.ru", "consultant.ru", "garant.ru"],
+                "notes": f"Часть {part_number}: {purpose}",
+            }
+            for purpose, query in focuses
+        ]
+
+    else:
+        # Parts 10–11: synthesis, no new document search.
+        return []
+
+
+def _load_grounded_session(
+    run_workspace: SubtopicRunWorkspace,
+    part_number: int = 2,
+) -> dict:
+    path = _grounded_session_path(run_workspace, part_number)
+    if not path.exists():
+        raise RuntimeError(
+            f"Grounded session for Part {part_number} not found. "
+            f"Run: prepare-grounded-session {run_workspace.subtopic_entry.item_id} --part {part_number}"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_grounded_session(
+    run_workspace: SubtopicRunWorkspace,
+    session: dict,
+    part_number: int = 2,
+) -> None:
+    path = _grounded_session_path(run_workspace, part_number)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _execute_grounded_search(query_obj: dict) -> dict:
+    """
+    Execute a REAL web search using urllib.
+    Returns structured results that will be injected into the Qwen prompt.
+    The model will only write cards for documents that appear in these results.
+    """
+    import urllib.parse
+
+    query_text = query_obj.get("query", "")
+    results: list[dict] = []
+    errors: list[str] = []
+
+    # --- pravo.gov.ru: public JSON API (most reliable) ---
+    try:
+        pravo_url = (
+            "https://publication.pravo.gov.ru/api/Documents"
+            f"?text={urllib.parse.quote(query_text)}&pageSize=8&orderBy=0"
+        )
+        raw = _http_get(pravo_url, timeout=12)
+        if not raw.startswith("[fetch-error]"):
+            data = json.loads(raw)
+            items = data.get("items", data.get("data", []))
+            for item in items[:6]:
+                doc_name = item.get("complexName") or item.get("id") or ""
+                results.append({
+                    "source": "pravo.gov.ru",
+                    "title": item.get("title") or item.get("name") or "",
+                    "url": f"https://publication.pravo.gov.ru/Document/View/{doc_name}",
+                    "date": item.get("signDate") or item.get("publicationDate") or "",
+                    "number": item.get("number") or "",
+                    "type": item.get("typeName") or "",
+                })
+        else:
+            errors.append(f"pravo.gov.ru: {raw}")
+    except Exception as exc:
+        errors.append(f"pravo.gov.ru: {exc}")
+
+    # --- consultant.ru: HTML scrape ---
+    try:
+        con_url = f"https://www.consultant.ru/search/?x=0&q={urllib.parse.quote(query_text)}"
+        raw = _http_get(con_url, timeout=10)
+        if not raw.startswith("[fetch-error]") and len(raw) > 200:
+            snippet = _strip_html_tags(raw, max_len=2500)
+            if snippet.strip():
+                results.append({"source": "consultant.ru", "raw_snippet": snippet})
+        else:
+            errors.append(f"consultant.ru: {raw[:80] if raw else 'empty'}")
+    except Exception as exc:
+        errors.append(f"consultant.ru: {exc}")
+
+    # --- garant.ru: HTML scrape ---
+    try:
+        gar_url = f"https://base.garant.ru/search/?q={urllib.parse.quote(query_text)}"
+        raw = _http_get(gar_url, timeout=10)
+        if not raw.startswith("[fetch-error]") and len(raw) > 200:
+            snippet = _strip_html_tags(raw, max_len=2500)
+            if snippet.strip():
+                results.append({"source": "garant.ru", "raw_snippet": snippet})
+        else:
+            errors.append(f"garant.ru: {raw[:80] if raw else 'empty'}")
+    except Exception as exc:
+        errors.append(f"garant.ru: {exc}")
+
+    return {
+        "query": query_text,
+        "query_id": query_obj.get("id", ""),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "results": results,
+        "errors": errors,
+        "success": bool(results),
+    }
+
+
+def _render_search_results_text(search_result: dict, query_text: str) -> str:
+    """Format real search results for injection into the Qwen prompt."""
+    results = search_result.get("results", [])
+    errors = search_result.get("errors", [])
+
+    if not results:
+        lines = [
+            "[Поиск не вернул результатов — сайты могут быть недоступны из текущей сети.]",
+            f"Запрос был: «{query_text}»",
+            "",
+            "Если Qwen может выполнить web_search самостоятельно — выполни его по этому запросу.",
+            "Пиши карточку ТОЛЬКО если найдёшь реальный документ через web_search/web_fetch.",
+            "Если документ не найден — напиши: РЕЗУЛЬТАТОВ НЕТ",
+        ]
+        if errors:
+            lines.append("\nОшибки поиска (справочно): " + "; ".join(errors))
+        return "\n".join(lines)
+
+    lines: list[str] = []
+    doc_index = 1
+    for r in results:
+        if r.get("title"):
+            lines.append(f"Документ {doc_index}:")
+            lines.append(f"  Название: {r['title']}")
+            if r.get("url"):
+                lines.append(f"  URL: {r['url']}")
+            if r.get("date"):
+                lines.append(f"  Дата подписания: {r['date']}")
+            if r.get("number"):
+                lines.append(f"  Номер: {r['number']}")
+            if r.get("type"):
+                lines.append(f"  Вид: {r['type']}")
+            lines.append("")
+            doc_index += 1
+        elif r.get("raw_snippet"):
+            lines.append(f"--- Результаты {r['source']} ---")
+            lines.append(r["raw_snippet"])
+            lines.append("")
+
+    if errors:
+        lines.append(f"(Недоступные источники: {', '.join(e.split(':')[0] for e in errors)})")
+
+    return "\n".join(lines)
+
+
+def _grounded_card_start(session: dict, current_query_id: str) -> int:
+    """Calculate starting card number for this query based on previously captured cards."""
+    total = 1
+    for q in session["queries"]:
+        if q["id"] == current_query_id:
+            break
+        total += q.get("cards_captured", 0)
+    return total
+
+
+def cmd_prepare_grounded_session(args: argparse.Namespace) -> int:
+    """
+    Step 1 of grounded workflow.
+    Works for any subtopic_id and any Part (2–9).
+    --part defaults to 2; for Part 3 uses canonical blocks, Part 4 uses organs, etc.
+    """
+    workspace_root = Path(args.workspace_root).resolve()
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root,
+        subtopic_id=args.subtopic_id,
+        theme_query=args.theme_query,
+    )
+    part_number = int(getattr(args, "part", 2) or 2)
+
+    if part_number in (10, 11):
+        print(
+            f"[grounded] Часть {part_number} — синтез, новый поиск не нужен. "
+            "Grounded-сессия не применима к Частям 10–11."
+        )
+        return 0
+
+    queries = _build_grounded_queries(run_workspace, part_number)
+    if not queries:
+        print(f"[grounded] Для Части {part_number} не сформировано запросов.")
+        return 1
+
+    # Session key includes part number so multiple parts can coexist.
+    session_key = f"part{part_number:02d}"
+    session: dict = {
+        "subtopic_id": args.subtopic_id,
+        "subtopic_title": run_workspace.subtopic_entry.title,
+        "part_number": part_number,
+        "session_key": session_key,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "total_queries": len(queries),
+        "queries": [
+            {
+                "id": q.get("id", f"q{i + 1:02d}"),
+                "query": q.get("query", ""),
+                "purpose": q.get("purpose", ""),
+                "preferred_domains": q.get("preferred_domains", []),
+                "notes": q.get("notes", ""),
+                "status": "pending",
+                "cards_captured": 0,
+            }
+            for i, q in enumerate(queries)
+        ],
+    }
+
+    # Sessions per part live in 06-grounded/{session_key}/
+    grounded_dir = _grounded_dir(run_workspace) / session_key
+    (grounded_dir / "packets").mkdir(parents=True, exist_ok=True)
+    (grounded_dir / "results").mkdir(parents=True, exist_ok=True)
+
+    session_path = grounded_dir / "session.json"
+    session_path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    first_id = session["queries"][0]["id"] if session["queries"] else "q01"
+    print(f"[grounded] Часть {part_number}: создано {len(queries)} запросов.")
+    print(f"[grounded] Директория: {grounded_dir}")
+    print(f"[grounded] Следующий шаг:")
+    print(f"  py notary_agent.py grounded-search-packet {args.subtopic_id} --part {part_number} --query-id {first_id}")
+    return 0
+
+
+def cmd_grounded_search_packet(args: argparse.Namespace) -> int:
+    """
+    Step 2 of grounded workflow: execute a real web search for one query,
+    inject real results into the prompt, output the grounded packet.
+    User pastes this packet into Qwen.
+    """
+    workspace_root = Path(args.workspace_root).resolve()
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root,
+        subtopic_id=args.subtopic_id,
+        theme_query=args.theme_query,
+    )
+    part_number = int(getattr(args, "part", 2) or 2)
+    session = _load_grounded_session(run_workspace, part_number)
+    query_id = args.query_id
+    query_obj = next((q for q in session["queries"] if q["id"] == query_id), None)
+    if query_obj is None:
+        raise RuntimeError(f"Query {query_id} not found in session for Part {part_number}.")
+
+    subtopic_title = session.get("subtopic_title", run_workspace.subtopic_entry.title)
+    card_start = _grounded_card_start(session, query_id)
+
+    print(f"[grounded] Часть {part_number} | Выполняю поиск: «{query_obj['query']}»...", flush=True)
+    search_result = _execute_grounded_search(query_obj)
+    n_structured = sum(1 for r in search_result["results"] if r.get("title"))
+    n_snippets = sum(1 for r in search_result["results"] if r.get("raw_snippet"))
+    print(
+        f"[grounded] Результаты: {n_structured} структурированных, "
+        f"{n_snippets} сниппетов. Ошибки: {len(search_result['errors'])}",
+        flush=True,
+    )
+
+    log_path = _grounded_dir(run_workspace, part_number) / "search-log.jsonl"
+    with open(log_path, "a", encoding="utf-8") as lf:
+        lf.write(json.dumps(search_result, ensure_ascii=False, default=str) + "\n")
+
+    search_text = _render_search_results_text(search_result, query_obj["query"])
+    packet = GROUNDED_PACKET_TEMPLATE.format(
+        subtopic_title=subtopic_title,
+        query_id=query_id,
+        query=query_obj["query"],
+        purpose=query_obj.get("purpose", ""),
+        timestamp=search_result["timestamp"],
+        search_results_text=search_text,
+        card_start=card_start,
+    )
+
+    packet_path = _grounded_dir(run_workspace, part_number) / "packets" / f"{query_id}.md"
+    write_text(packet_path, packet)
+
+    if getattr(args, "output_file", None):
+        write_text(Path(args.output_file), packet)
+        print(f"[grounded] Пакет сохранён: {args.output_file}")
+    else:
+        print("\n" + "=" * 72)
+        print(packet)
+        print("=" * 72)
+
+    for q in session["queries"]:
+        if q["id"] == query_id:
+            q["status"] = "packet_sent"
+            break
+    _save_grounded_session(run_workspace, session, part_number)
+
+    print(f"\n[grounded] Вставь пакет выше в Qwen. После получения ответа:")
+    print(f"  py notary_agent.py capture-grounded-cards {args.subtopic_id} --part {part_number} --query-id {query_id} --source-file <ответ.md>")
+    return 0
+
+
+def cmd_capture_grounded_cards(args: argparse.Namespace) -> int:
+    """Step 3: capture Qwen's card response for one query of any part."""
+    workspace_root = Path(args.workspace_root).resolve()
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root,
+        subtopic_id=args.subtopic_id,
+        theme_query=args.theme_query,
+    )
+    part_number = int(getattr(args, "part", 2) or 2)
+    session = _load_grounded_session(run_workspace, part_number)
+    query_id = args.query_id
+    query_obj = next((q for q in session["queries"] if q["id"] == query_id), None)
+    if query_obj is None:
+        raise RuntimeError(f"Query {query_id} not found in session for Part {part_number}.")
+
+    content = load_part_output_source(
+        getattr(args, "source_file", None),
+        getattr(args, "clipboard", False),
+    )
+
+    grounding_errors = check_search_grounding(content, part_number)
+    if grounding_errors:
+        raise RuntimeError("\n".join(grounding_errors))
+
+    card_count = content.count("URL1:")
+    result_path = _grounded_dir(run_workspace, part_number) / "results" / f"{query_id}.md"
+    write_text(result_path, content.rstrip() + "\n")
+
+    for q in session["queries"]:
+        if q["id"] == query_id:
+            q["status"] = "captured"
+            q["cards_captured"] = card_count
+            break
+    _save_grounded_session(run_workspace, session, part_number)
+
+    done_count = sum(1 for q in session["queries"] if q["status"] == "captured")
+    total = session["total_queries"]
+    total_cards = sum(q.get("cards_captured", 0) for q in session["queries"])
+
+    print(f"[grounded] Захвачено: {card_count} карточек по запросу {query_id} (Часть {part_number}).")
+    print(f"[grounded] Прогресс: {done_count}/{total}, карточек всего: {total_cards}.")
+
+    next_q = next((q for q in session["queries"] if q["status"] == "pending"), None)
+    if next_q:
+        print(f"[grounded] Следующий:")
+        print(f"  py notary_agent.py grounded-search-packet {args.subtopic_id} --part {part_number} --query-id {next_q['id']}")
+    elif done_count == total:
+        print(f"[grounded] Все запросы Части {part_number} обработаны! Запусти:")
+        print(f"  py notary_agent.py assemble-grounded-part {args.subtopic_id} --part {part_number}")
+    return 0
+
+
+def cmd_grounded_status(args: argparse.Namespace) -> int:
+    """Show grounded session progress for any part and subtopic."""
+    workspace_root = Path(args.workspace_root).resolve()
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root,
+        subtopic_id=args.subtopic_id,
+        theme_query=args.theme_query,
+    )
+    part_number = int(getattr(args, "part", 2) or 2)
+    session = _load_grounded_session(run_workspace, part_number)
+
+    captured = [q for q in session["queries"] if q["status"] == "captured"]
+    pending = [q for q in session["queries"] if q["status"] == "pending"]
+    sent = [q for q in session["queries"] if q["status"] == "packet_sent"]
+    total_cards = sum(q.get("cards_captured", 0) for q in captured)
+
+    print(json.dumps({
+        "subtopic_id": args.subtopic_id,
+        "part_number": part_number,
+        "total_queries": session["total_queries"],
+        "captured": len(captured),
+        "pending": len(pending),
+        "awaiting_capture": len(sent),
+        "total_cards_so_far": total_cards,
+        "next_pending_id": pending[0]["id"] if pending else None,
+        "complete": len(pending) == 0 and len(sent) == 0,
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_assemble_grounded_part(args: argparse.Namespace) -> int:
+    """Assemble all grounded cards for any part of any subtopic into stage-outputs."""
+    workspace_root = Path(args.workspace_root).resolve()
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root,
+        subtopic_id=args.subtopic_id,
+        theme_query=args.theme_query,
+    )
+    part_number = int(getattr(args, "part", 2) or 2)
+    session = _load_grounded_session(run_workspace, part_number)
+
+    results_dir = _grounded_dir(run_workspace, part_number) / "results"
+    blocks: list[str] = []
+    total_cards = 0
+
+    for q in session["queries"]:
+        if q["status"] != "captured":
+            continue
+        result_path = results_dir / f"{q['id']}.md"
+        if not result_path.exists():
+            continue
+        content = read_text(result_path).strip()
+        if content and "РЕЗУЛЬТАТОВ НЕТ" not in content:
+            blocks.append(content)
+            total_cards += q.get("cards_captured", 0)
+
+    if not blocks:
+        raise RuntimeError(
+            "Нет захваченных карточек. "
+            "Выполни grounded-search-packet + capture-grounded-cards для каждого запроса."
+        )
+
+    assembled = "\n\n".join(blocks)
+
+    # Save assembled before URL2 verification.
+    assembled_path = _grounded_dir(run_workspace, part_number) / "grounded-assembled.md"
+    write_text(assembled_path, assembled + "\n")
+
+    # Live URL2 verification.
+    print(f"[grounded] Живая верификация URL2 ({assembled.count('URL2:')} ссылок)...")
+    assembled, url2_summary = verify_and_annotate_url2_titles(assembled)
+    if url2_summary:
+        assembled = assembled.rstrip() + "\n" + "".join(url2_summary)
+        print("[url2-verify] " + "=" * 60)
+        print("".join(url2_summary))
+
+    # Capture into stage-outputs with trusted source_origin.
+    output_path = run_workspace.stage_outputs_dir / f"part-{part_number:02d}.md"
+    write_text(output_path, assembled.rstrip() + "\n")
+
+    status = "completed_core_answer" if part_number == 2 else "completed"
+    update_run_manifest_part_status(
+        run_workspace,
+        part_number,
+        status,
+        source_origin="grounded_research_session",
+        validation_issues=[],
+        validation_passed=True,
+    )
+
+    if not run_workspace.is_surgical_redo:
+        refresh_dynamic_part_packets(run_workspace)
+    refresh_master_working_file(run_workspace)
+
+    if part_number == 5:
+        write_local_metric_checkpoint(run_workspace, "after_parts_02_05", target="master")
+    elif part_number == 11:
+        write_local_metric_checkpoint(run_workspace, "after_parts_02_11", target="master")
+
+    metrics = compute_text_metrics(assembled)
+    advisories = collect_publish_metric_advisories(metrics)
+    for adv in advisories:
+        print(adv)
+
+    print(json.dumps({
+        "queries_processed": len(blocks),
+        "total_cards": total_cards,
+        "words": metrics["words"],
+        "url1": metrics["url1"],
+        "url2": metrics["url2"],
+        "output_path": str(output_path),
+    }, ensure_ascii=False, indent=2))
+
+    if part_number == 2 and not run_workspace.is_surgical_redo:
+        assemble_subtopic_final(run_workspace, publish=False)
+
+    return 0
+
+
+# ================================================================
+# Level 3 + 4 — API-driven research session (interleaved tool use)
+# ================================================================
+
+_ANTHROPIC_SEARCH_BACKENDS = [
+    ("consultant", "https://www.consultant.ru/search/?x=0&q={query}"),
+    ("garant",     "https://base.garant.ru/search/?q={query}"),
+    ("pravo_gov",  "https://publication.pravo.gov.ru/api/Documents?text={query}&pageSize=5"),
+]
+
+_SEARCH_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+
+def _http_get(url: str, timeout: int = 8) -> str:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _SEARCH_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            charset = "utf-8"
+            ct = resp.headers.get_content_charset()
+            if ct:
+                charset = ct
+            return resp.read().decode(charset, errors="replace")
+    except Exception as exc:
+        return f"[fetch-error] {exc}"
+
+
+def _strip_html_tags(html_text: str, max_len: int = 4000) -> str:
+    stripped = re.sub(r"<[^>]+>", " ", html_text)
+    stripped = re.sub(r"\s{2,}", " ", stripped).strip()
+    return stripped[:max_len]
+
+
+def execute_web_search(query: str, source: str = "all") -> dict[str, Any]:
+    results: list[dict[str, str]] = []
+    import urllib.parse
+    backends = _ANTHROPIC_SEARCH_BACKENDS if source == "all" else [
+        b for b in _ANTHROPIC_SEARCH_BACKENDS if b[0] == source
+    ]
+    for backend_name, url_tpl in backends:
+        url = url_tpl.format(query=urllib.parse.quote(query))
+        raw = _http_get(url)
+        if raw.startswith("[fetch-error]"):
+            results.append({"source": backend_name, "error": raw})
+        else:
+            snippet = _strip_html_tags(raw, max_len=3000)
+            results.append({"source": backend_name, "url": url, "snippet": snippet})
+    return {"query": query, "timestamp": datetime.now(timezone.utc).isoformat(), "results": results}
+
+
+def execute_web_fetch_tool(url: str) -> dict[str, Any]:
+    raw = _http_get(url)
+    if raw.startswith("[fetch-error]"):
+        return {"url": url, "error": raw, "ok": False}
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", raw, re.IGNORECASE | re.DOTALL)
+    title = (title_match.group(1) if title_match else "").strip()
+    title = re.sub(r"\s+", " ", title)
+    snippet = _strip_html_tags(raw, max_len=3000)
+    return {"url": url, "title": title, "snippet": snippet, "ok": True,
+            "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+def _load_api_session_prompt(run_workspace: SubtopicRunWorkspace, part_number: int) -> str:
+    stage_input_path = run_workspace.stage_inputs_dir / f"part-{part_number:02d}.md"
+    if not stage_input_path.exists():
+        raise RuntimeError(f"Stage input for Part {part_number} not found: {stage_input_path}")
+    base_prompt = read_text(stage_input_path)
+    research_pack_path = run_workspace.web_plan_dir / "part-02.research-pack.md"
+    if research_pack_path.exists() and part_number == 2:
+        pack_text = read_text(research_pack_path)
+        base_prompt = base_prompt + "\n\n---\n\n" + pack_text
+    grounding_mandate = """
+================================================================
+МАНДАТ ПОИСКА (ОБЯЗАТЕЛЬНО — Level 3/4 grounded research session)
+
+Ты выполняешь исследование через реальные вызовы инструментов:
+- web_search(query, source) — поиск по правовым базам
+- web_fetch(url) — открытие конкретной страницы
+
+ПРАВИЛО: перед каждой карточкой документа обязан быть реальный
+вызов web_search или web_fetch. Документ без предшествующего
+вызова инструмента НЕ МОЖЕТ попасть в финальный ответ.
+
+ФОРМАТ МАРКЕРА:
+  >>> ПОИСК: "твой запрос"
+  [результат web_search]
+  Карточка 1: ...
+
+URL2 — только после реального web_fetch по этому URL.
+================================================================
+"""
+    return base_prompt + grounding_mandate
+
+
+def _run_anthropic_agentic_loop(
+    client: Any,
+    model: str,
+    system: str,
+    prompt: str,
+    tools: list[dict],
+    max_iterations: int = 60,
+    log_path: Path | None = None,
+) -> str:
+    messages: list[dict] = [{"role": "user", "content": prompt}]
+    accumulated_text: list[str] = []
+    log_entries: list[dict] = []
+    iteration = 0
+    while iteration < max_iterations:
+        iteration += 1
+        response = client.messages.create(
+            model=model, max_tokens=8192, system=system, tools=tools, messages=messages,
+        )
+        text_in_turn: list[str] = []
+        tool_calls: list[Any] = []
+        for block in response.content:
+            if block.type == "text":
+                text_in_turn.append(block.text)
+            elif block.type == "tool_use":
+                tool_calls.append(block)
+        if text_in_turn:
+            turn_text = "\n".join(text_in_turn)
+            accumulated_text.append(turn_text)
+            print(f"[api-session] Итерация {iteration}: {len(turn_text)} символов", flush=True)
+        if not tool_calls or response.stop_reason == "end_turn":
+            break
+        tool_results: list[dict] = []
+        for tc in tool_calls:
+            tool_name = tc.name
+            tool_input = tc.input
+            print(f"[api-session]   tool_call: {tool_name}({list(tool_input.keys())})", flush=True)
+            if tool_name == "web_search":
+                result = execute_web_search(
+                    query=tool_input.get("query", ""),
+                    source=tool_input.get("source", "all"),
+                )
+            elif tool_name == "web_fetch":
+                result = execute_web_fetch_tool(url=tool_input.get("url", ""))
+            else:
+                result = {"error": f"Unknown tool: {tool_name}"}
+            log_entries.append({
+                "iteration": iteration, "tool": tool_name, "input": tool_input,
+                "timestamp": datetime.now(timezone.utc).isoformat(), "ok": "error" not in result,
+            })
+            tool_results.append({
+                "type": "tool_result", "tool_use_id": tc.id,
+                "content": json.dumps(result, ensure_ascii=False, default=str),
+            })
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results})
+    if log_path is not None and log_entries:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as lf:
+            for entry in log_entries:
+                lf.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return "\n\n".join(accumulated_text)
+
+
+def cmd_api_research_session(args: argparse.Namespace) -> int:
+    """Level 3+4 — API-driven research session via Anthropic tool_use."""
+    try:
+        import anthropic  # type: ignore
+    except ImportError:
+        print("ERROR: пакет anthropic не установлен. Установите: pip install anthropic", file=sys.stderr)
+        return 1
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        print("ERROR: ANTHROPIC_API_KEY не задан.", file=sys.stderr)
+        return 1
+    workspace_root = Path(args.workspace_root).resolve()
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root, subtopic_id=args.subtopic_id, theme_query=args.theme_query,
+    )
+    part_number = int(args.part)
+    if part_number < 2 or part_number > 11:
+        raise RuntimeError("--part must be between 2 and 11")
+    assert_run_command_allowed(run_workspace, "capture-part-output", part_number=part_number)
+    model = (args.model or "claude-opus-4-6").strip()
+    print(f"[api-session] Запуск: подтема={args.subtopic_id}, Часть={part_number}, модель={model}")
+    prompt = _load_api_session_prompt(run_workspace, part_number)
+    system_prompt = (
+        "Ты — старший юридический аналитик, специализирующийся на нотариальном праве России. "
+        "Ты выполняешь реальный правовой research, используя инструменты web_search и web_fetch. "
+        "Ни один документ не включается без предшествующего вызова инструмента."
+    )
+    tools = [
+        {
+            "name": "web_search",
+            "description": "Поиск по российским правовым базам (КонсультантПлюс, Гарант, pravo.gov.ru).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Поисковый запрос"},
+                    "source": {"type": "string", "enum": ["consultant", "garant", "pravo_gov", "all"]},
+                },
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "web_fetch",
+            "description": "Открыть URL, получить заголовок и содержимое страницы для верификации URL2.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        },
+    ]
+    client = anthropic.Anthropic(api_key=api_key)
+    research_log_path = run_workspace.web_plan_dir / "research-log.jsonl"
+    output_text = _run_anthropic_agentic_loop(
+        client=client, model=model, system=system_prompt, prompt=prompt, tools=tools,
+        max_iterations=int(getattr(args, "max_iterations", 60)), log_path=research_log_path,
+    )
+    if not output_text.strip():
+        raise RuntimeError("API session returned empty output.")
+    output_text_normalized = normalize_part_output(part_number, output_text)
+    grounding_errors = check_search_grounding(output_text_normalized, part_number)
+    if grounding_errors:
+        raise RuntimeError("\n".join(grounding_errors))
+    print(f"[url2-verify] Запуск живой верификации URL2 для Части {part_number}...")
+    output_text_normalized, url2_summary = verify_and_annotate_url2_titles(output_text_normalized)
+    if url2_summary:
+        output_text_normalized = output_text_normalized.rstrip() + "\n" + "".join(url2_summary)
+        print("[url2-verify] " + "=" * 60)
+        print("".join(url2_summary))
+    else:
+        print("[url2-verify] Все проверенные URL2 — OK.")
+    output_path = run_workspace.stage_outputs_dir / f"part-{part_number:02d}.md"
+    write_text(output_path, output_text_normalized.rstrip() + "\n")
+    status = "completed_core_answer" if part_number == 2 else "completed"
+    update_run_manifest_part_status(
+        run_workspace, part_number, status,
+        source_origin="api_research_session", validation_issues=[], validation_passed=True,
+    )
+    if not run_workspace.is_surgical_redo:
+        refresh_dynamic_part_packets(run_workspace)
+    refresh_master_working_file(run_workspace)
+    if part_number == 5:
+        write_local_metric_checkpoint(run_workspace, "after_parts_02_05", target="master")
+    elif part_number == 11:
+        write_local_metric_checkpoint(run_workspace, "after_parts_02_11", target="master")
+    if part_number == 2 and not run_workspace.is_surgical_redo:
+        assemble_subtopic_final(run_workspace, publish=False)
+    print(f"[api-session] Готово. Результат сохранён: {output_path}")
     return 0
 
 
@@ -8408,6 +9572,77 @@ def build_parser() -> argparse.ArgumentParser:
     batch_run_parser.add_argument("--dry-run", action="store_true")
     batch_run_parser.add_argument("--include-existing-notes", action="store_true")
     batch_run_parser.set_defaults(func=cmd_batch_run)
+
+    prepare_grounded = subparsers.add_parser(
+        "prepare-grounded-session",
+        help=(
+            "Level 3: Create grounded research session (step 1). "
+            "Works for any subtopic and any Part 2–9. "
+            "Part 2=queries.json, Part 3=canonical blocks, Part 4=organs, Parts 5–9=focused queries."
+        ),
+    )
+    prepare_grounded.add_argument("subtopic_id")
+    prepare_grounded.add_argument("--part", type=int, default=2, help="Part number (2–9, default: 2)")
+    prepare_grounded.add_argument("--theme-query")
+    prepare_grounded.add_argument("--workspace-root", default=".")
+    prepare_grounded.set_defaults(func=cmd_prepare_grounded_session)
+
+    grounded_packet = subparsers.add_parser(
+        "grounded-search-packet",
+        help="Level 3: Execute real web search for one query, inject into prompt (step 2). Paste into Qwen.",
+    )
+    grounded_packet.add_argument("subtopic_id")
+    grounded_packet.add_argument("--part", type=int, default=2)
+    grounded_packet.add_argument("--query-id", required=True, help="Query ID from session, e.g. q01")
+    grounded_packet.add_argument("--theme-query")
+    grounded_packet.add_argument("--workspace-root", default=".")
+    grounded_packet.add_argument("--output-file", help="Save packet to file instead of stdout")
+    grounded_packet.set_defaults(func=cmd_grounded_search_packet)
+
+    capture_grounded = subparsers.add_parser(
+        "capture-grounded-cards",
+        help="Level 3: Capture Qwen's card response for one query (step 3).",
+    )
+    capture_grounded.add_argument("subtopic_id")
+    capture_grounded.add_argument("--part", type=int, default=2)
+    capture_grounded.add_argument("--query-id", required=True)
+    capture_grounded.add_argument("--theme-query")
+    capture_grounded.add_argument("--workspace-root", default=".")
+    capture_grounded.add_argument("--source-file", help="File with Qwen's response")
+    capture_grounded.add_argument("--clipboard", action="store_true")
+    capture_grounded.set_defaults(func=cmd_capture_grounded_cards)
+
+    grounded_status = subparsers.add_parser(
+        "grounded-status",
+        help="Level 3: Show grounded session progress for any part and subtopic.",
+    )
+    grounded_status.add_argument("subtopic_id")
+    grounded_status.add_argument("--part", type=int, default=2)
+    grounded_status.add_argument("--theme-query")
+    grounded_status.add_argument("--workspace-root", default=".")
+    grounded_status.set_defaults(func=cmd_grounded_status)
+
+    assemble_grounded = subparsers.add_parser(
+        "assemble-grounded-part",
+        help="Level 3: Assemble all grounded cards into Part output and capture (final step).",
+    )
+    assemble_grounded.add_argument("subtopic_id")
+    assemble_grounded.add_argument("--part", type=int, default=2)
+    assemble_grounded.add_argument("--theme-query")
+    assemble_grounded.add_argument("--workspace-root", default=".")
+    assemble_grounded.set_defaults(func=cmd_assemble_grounded_part)
+
+    api_research_session = subparsers.add_parser(
+        "api-research-session",
+        help="Level 3+4: API-driven research session via Anthropic tool_use.",
+    )
+    api_research_session.add_argument("subtopic_id")
+    api_research_session.add_argument("--part", type=int, required=True)
+    api_research_session.add_argument("--theme-query")
+    api_research_session.add_argument("--workspace-root", default=".")
+    api_research_session.add_argument("--model", default="claude-opus-4-6")
+    api_research_session.add_argument("--max-iterations", type=int, default=60)
+    api_research_session.set_defaults(func=cmd_api_research_session)
 
     return parser
 
