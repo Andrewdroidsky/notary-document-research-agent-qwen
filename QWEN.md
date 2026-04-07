@@ -22,11 +22,21 @@
 - даёт команды на продолжение
 
 ### Правильный workflow
-1. `prepare-part-XX-plan` → агент готовит пакет
-2. Qwen генерирует текст Части через web_search
-3. `capture-part-output` → агент валидирует и захватывает
-4. Повторять п.1–3 для каждой Части
-5. `assemble-subtopic-final` → сборка и публикация
+
+**⚠ ОБЯЗАТЕЛЬНЫЙ НУЛЕВОЙ ШАГ перед любым web_search:**
+
+```
+python notary_agent.py prepare-part-02-web <subtopic_id>
+```
+
+Эта команда создаёт run и пустой research-log. Запрещено начинать web_search до её выполнения. Запрещено создавать run вручную через mkdir. Запрещено писать research-log задним числом.
+
+1. `prepare-part-02-web <subtopic_id>` → run создан, research-log пустой, launch packet готов
+2. Qwen читает launch packet — в нём точный путь к research-log
+3. Qwen генерирует текст Части через web_search / web_fetch, каждый вызов сразу пишет в research-log
+4. `capture-part-output` → агент валидирует и захватывает
+5. Повторять п.1–4 для каждой Части (prepare-part-XX-plan для Частей 3–9)
+6. `assemble-subtopic-final` → сборка и публикация
 
 ### Запрещено
 - Писать собственные скрипты конвертации (md_to_docx.py) в обход capture-part-output
