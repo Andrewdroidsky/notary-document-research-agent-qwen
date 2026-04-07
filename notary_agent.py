@@ -329,6 +329,12 @@ WEBFETCH_MANDATE = """==========================================================
 Только fetch-and-log создаёт доверенные записи (fetched_by_agent=true).
 Записи без fetched_by_agent=true блокируют захват.
 
+При MISMATCH заголовка: причина — URL ведёт на весь документ, а не на конкретную статью.
+Решение: используй URL конкретной статьи с якорем-хэшем.
+  НЕВЕРНО: URL2: `https://www.consultant.ru/document/cons_doc_LAW_39570/`
+  ВЕРНО:   URL2: `https://www.consultant.ru/document/cons_doc_LAW_39570/cabd43bd.../`
+fetch-and-log вернёт заголовок статьи — вставь его в «Заголовок страницы URL2».
+
 Эти маркеры (>>> ПОИСК и "Продолжаю верификацию через web_fetch") должны
 присутствовать ВНУТРИ текста Части — не как отдельные сообщения в чат,
 а прямо в теле ответа между блоками карточек. Они попадают в захват и
@@ -5007,11 +5013,25 @@ def _fetch_real_page_title(url: str, timeout: int = 8) -> tuple[str, str]:
         return ("", "error")
 
 
+_DOC_CODE_RE = re.compile(
+    r"\b(гк|гпк|апк|упк|нк|кас|тк|жк|зк|уик|бк|кис)\s*рф\b"
+    r"|\bосновы\s+законодательства\b"
+    r"|\bфедеральн\w+\s+закон\b",
+    re.IGNORECASE,
+)
+_LAW_NUM_RE = re.compile(r"\b\d+\s*[-–]\s*фз\b|\b\d+\s*[-–]\s*фкз\b", re.IGNORECASE)
+_ARTICLE_RE = re.compile(r"\b(статья|ст\.)\s*\d+", re.IGNORECASE)
+
+
 def _titles_match(claimed: str, real: str) -> bool:
     """
     Fuzzy match: check if the claimed title meaningfully overlaps with the real title.
-    Returns True if ≥35% of significant words in claimed title appear in real title,
-    or if either is a substring of the other (case-insensitive).
+    Returns True if:
+    - either is a substring of the other (case-insensitive), OR
+    - ≥35% of significant words in claimed title appear in real title, OR
+    - parent-document check: claimed title references an article of a law, and
+      real title is that same law (same code abbreviation or law number).
+      Example: "Статья 311 ГПК РФ..." vs "Гражданский процессуальный кодекс (ГПК РФ)..."
     """
     if not claimed or not real:
         return False
@@ -5019,6 +5039,19 @@ def _titles_match(claimed: str, real: str) -> bool:
     r = real.lower().strip()
     if c in r or r in c:
         return True
+
+    # Parent-document check: claimed title is an article of a law,
+    # real title is the parent document → treat as OK (URL points to parent)
+    if _ARTICLE_RE.search(c):
+        c_codes = set(m.group(0).lower() for m in _DOC_CODE_RE.finditer(c))
+        r_codes = set(m.group(0).lower() for m in _DOC_CODE_RE.finditer(r))
+        if c_codes and r_codes and (c_codes & r_codes):
+            return True  # same law code in both → parent-document match
+        c_laws = set(_LAW_NUM_RE.findall(c))
+        r_laws = set(_LAW_NUM_RE.findall(r))
+        if c_laws and r_laws and (c_laws & r_laws):
+            return True  # same law number in both → parent-document match
+
     # word-level overlap
     stop = {"от", "об", "на", "по", "в", "к", "с", "и", "о", "или", "при", "для", "за",
             "не", "об", "до", "из", "а", "the", "of", "and", "in", "to", "for"}
