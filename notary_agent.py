@@ -2252,8 +2252,45 @@ def build_part_02_launch_packet(run_workspace: SubtopicRunWorkspace) -> str:
         lines.append(
             f"- Тарифный блок должен быть привязан к базовому действию из `{focus['substantive_sibling']['item_id']}`."
         )
+    research_log_path = run_workspace.web_plan_dir / "research-log.jsonl"
     lines.extend(
         [
+            "",
+            "## ⚠ ШАГ 0 — ОБЯЗАТЕЛЕН ДО ПЕРВОГО web_search",
+            "",
+            "Research-log уже создан и находится по адресу:",
+            "",
+            "```",
+            f"{research_log_path}",
+            "```",
+            "",
+            "**Правило:** каждый вызов web_search и web_fetch немедленно фиксируй в этом файле.",
+            "Capture заблокируется если лог пустой ИЛИ если записи содержат только URL без содержимого.",
+            "",
+            "Формат записи web_search:",
+            "```json",
+            '{"query": "текст запроса", "timestamp": "2026-04-07T15:00:00", "source": "consultant.ru", "results_count": 5}',
+            "```",
+            "",
+            "Формат записи web_fetch:",
+            "```json",
+            '{"url_fetched": "https://...", "timestamp": "2026-04-07T15:01:00", "title": "Заголовок страницы", "content_preview": "первые 200 символов текста"}',
+            "```",
+            "",
+            "**Запрещено:** начинать работу без проверки что этот файл существует.",
+            "**Запрещено:** записывать в лог задним числом после завершения работы.",
+            "**Запрещено:** реконструировать лог из памяти модели.",
+            "",
+            "## Прогрессивное сохранение черновика",
+            "",
+            "Путь черновика для Части 2:",
+            "",
+            "```",
+            f"{run_workspace.web_plan_dir / 'draft-part-02.md'}",
+            "```",
+            "",
+            "После каждой найденной карточки дописывай её в этот файл через Write tool.",
+            "Это защищает от потери данных при сбое сессии. Финальный .docx будет собран из всех захваченных частей отдельной командой.",
             "",
             WEBFETCH_MANDATE,
             "",
@@ -3328,6 +3365,47 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
     if part_number == 2:
         packet_text += "\n\n" + PART2_ANALYSIS_MANDATE
     if 2 <= part_number <= 9:
+        research_log_path = run_workspace.web_plan_dir / "research-log.jsonl"
+        draft_path = run_workspace.web_plan_dir / f"draft-part-{part_number:02d}.md"
+        packet_text += f"""
+
+## ⚠ ШАГ 0 — ОБЯЗАТЕЛЕН ДО ПЕРВОГО web_search
+
+Research-log уже создан и находится по адресу:
+
+```
+{research_log_path}
+```
+
+**Правило:** каждый вызов web_search и web_fetch немедленно фиксируй в этом файле.
+Capture заблокируется если лог пустой ИЛИ если записи содержат только URL без содержимого.
+
+Формат записи web_search:
+```json
+{{"query": "текст запроса", "timestamp": "2026-04-07T15:00:00", "source": "consultant.ru", "results_count": 5}}
+```
+
+Формат записи web_fetch:
+```json
+{{"url_fetched": "https://...", "timestamp": "2026-04-07T15:01:00", "title": "Заголовок страницы", "content_preview": "первые 200 символов текста"}}
+```
+
+**Запрещено:** начинать работу без проверки что этот файл существует.
+**Запрещено:** записывать в лог задним числом после завершения работы.
+**Запрещено:** реконструировать лог из памяти модели.
+
+## Прогрессивное сохранение черновика
+
+Путь черновика для текущей части:
+
+```
+{draft_path}
+```
+
+После каждой найденной карточки дописывай её в этот файл через Write tool.
+Это защищает от потери данных при сбое сессии. Финальный .docx будет собран из всех захваченных частей отдельной командой.
+
+"""
         packet_text += "\n\n" + WEBFETCH_MANDATE
     if 2 <= part_number <= 11:
         packet_text += "\n\n" + SEARCH_LAYERS_MANDATE
@@ -4630,13 +4708,21 @@ def split_document_blocks_by_full_name(text: str) -> list[str]:
 
 
 def validate_url2_against_research_log(text: str, research_log_path: Path) -> list[str]:
-    """Каждый URL2 в карточке должен иметь предшествующий web_search/web_fetch в research-log."""
+    """Каждый URL2 в карточке должен иметь предшествующий web_search/web_fetch в research-log.
+
+    Защита от ручного добавления записей: запись с URL-полем должна содержать
+    не менее 2 дополнительных полей (query, title, content, type и т.п.).
+    Запись вида {"url": "...", "timestamp": "..."} считается фиктивной.
+    """
+    _TIMESTAMP_KEYS = {"timestamp", "time", "created_at", "date"}
+
     issues: list[str] = []
     if not research_log_path.exists() or research_log_path.stat().st_size == 0:
         return ["research-log.jsonl отсутствует или пуст — невозможно проверить верификацию URL2"]
 
-    # Собираем все URL из research-log (и web_search, и web_fetch)
-    logged_urls: set[str] = set()
+    logged_urls: set[str] = set()     # богатые записи (≥2 доп. поля)
+    bare_urls: set[str] = set()       # голые записи (только URL + timestamp)
+
     with open(research_log_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -4644,35 +4730,59 @@ def validate_url2_against_research_log(text: str, research_log_path: Path) -> li
                 continue
             try:
                 entry = json.loads(line)
-                for url_field in ["url", "url_fetched", "search_url", "fetch_url"]:
-                    if url_field in entry and entry[url_field]:
-                        logged_urls.add(entry[url_field])
-                # Также ищем URL в любых строках значения
-                for val in entry.values():
-                    if isinstance(val, str) and (val.startswith("http://") or val.startswith("https://")):
-                        logged_urls.add(val)
             except json.JSONDecodeError:
                 continue
 
-    # Извлекаем все URL2 из текста
+            entry_urls: list[str] = []
+            for url_field in ["url", "url_fetched", "search_url", "fetch_url"]:
+                if url_field in entry and isinstance(entry[url_field], str) and entry[url_field]:
+                    entry_urls.append(entry[url_field])
+            for val in entry.values():
+                if isinstance(val, str) and (val.startswith("http://") or val.startswith("https://")):
+                    if val not in entry_urls:
+                        entry_urls.append(val)
+
+            if not entry_urls:
+                continue
+
+            extra_fields = {
+                k for k, v in entry.items()
+                if k.lower() not in _TIMESTAMP_KEYS
+                and not (isinstance(v, str) and (v.startswith("http://") or v.startswith("https://")))
+            }
+            has_content = len(extra_fields) >= 2
+
+            for u in entry_urls:
+                if has_content:
+                    logged_urls.add(u)
+                else:
+                    bare_urls.add(u)
+
     url2_pattern = re.compile(r"`(https?://[^`]+)`")
     found_url2 = set(url2_pattern.findall(text))
 
-    # Проверяем каждый URL2
+    def _matches(url: str, pool: set[str]) -> bool:
+        if url in pool:
+            return True
+        for logged in pool:
+            if url in logged or logged in url:
+                return True
+        return False
+
     for url in found_url2:
-        # Проверяем точное совпадение или что logged URL является базой для этого URL
-        if url not in logged_urls:
-            # Проверяем частичное совпадение — может быть base URL
-            matched = False
-            for logged in logged_urls:
-                if url in logged or logged in url:
-                    matched = True
-                    break
-            if not matched:
-                issues.append(
-                    f"URL2 `{url[:80]}...` не найден в research-log — нет подтверждения реального web_fetch. "
-                    f"Каждый URL2 должен быть подтверждён вызовом web_fetch перед записью в карточку."
-                )
+        if _matches(url, logged_urls):
+            continue
+        if _matches(url, bare_urls):
+            issues.append(
+                f"URL2 `{url[:80]}...` найден в research-log, но запись содержит только URL без "
+                f"содержимого (query/title/content). Вероятно, добавлена вручную, а не через "
+                f"реальный web_fetch. Выполните настоящий web_fetch и повторите capture."
+            )
+        else:
+            issues.append(
+                f"URL2 `{url[:80]}...` не найден в research-log — нет подтверждения реального web_fetch. "
+                f"Каждый URL2 должен быть подтверждён вызовом web_fetch перед записью в карточку."
+            )
     return issues
 
 
