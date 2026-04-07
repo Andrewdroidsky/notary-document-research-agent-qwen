@@ -7066,6 +7066,92 @@ def check_url2_title_audit_at_capture(content: str, part_number: int) -> list[st
     return errors
 
 
+def check_structural_elements_soft(content: str, part_number: int) -> list[str]:
+    """Soft (advisory) check: for each card whose URL2 is accessible, search the page
+    text for the declared structural element (статья X, пункт X.X, etc.).
+    Not found on accessible page → warning with doc name + struct_el + URL2.
+    Blocked/timeout pages → silently skipped (UNVERIFIED).
+    Never blocks capture — returns warnings only.
+    """
+    import concurrent.futures
+
+    if part_number < 2 or part_number > 9:
+        return []
+
+    pairs = _parse_url2_pairs(content)
+    pairs_with_struct = [p for p in pairs if p.get("struct_el") and p.get("url2")]
+    if not pairs_with_struct:
+        return []
+
+    def _fetch_page_text(url: str, timeout: int = 8) -> tuple[str, str]:
+        """Fetch up to 256KB of page text for structural element search."""
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                charset = resp.headers.get_content_charset() or "utf-8"
+                raw = resp.read(262144)  # 256KB — captures TOC and article headings
+                return (raw.decode(charset, errors="replace"), "ok")
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                return ("", "blocked")
+            return ("", "error")
+        except Exception:
+            return ("", "timeout")
+
+    def _struct_el_variants(struct_el: str) -> list[str]:
+        """Generate search variants for structural element string."""
+        el = struct_el.strip()
+        variants = [el, el.lower()]
+        # "статья 15" → also try "Статья 15", "ст. 15", "ст.15"
+        m = re.match(r"^(статья|пункт|часть|глава|раздел|параграф)\s+(\S+)", el, re.IGNORECASE)
+        if m:
+            keyword, num = m.group(1).lower(), m.group(2)
+            abbrevs = {"статья": ["ст.", "ст "], "пункт": ["п.", "п "], "часть": ["ч.", "ч "],
+                       "глава": ["гл.", "гл "], "раздел": ["разд.", "разд "], "параграф": ["§"]}
+            for abbr in abbrevs.get(keyword, []):
+                variants.append(f"{abbr}{num}")
+                variants.append(f"{abbr} {num}")
+        return variants
+
+    def _check_one(pair: dict) -> dict | None:
+        page_text, status = _fetch_page_text(pair["url2"])
+        if status != "ok" or not page_text:
+            return None  # blocked/timeout — skip silently
+        struct_el = pair["struct_el"]
+        for variant in _struct_el_variants(struct_el):
+            if variant in page_text or variant in page_text.lower():
+                return None  # found — OK
+        return pair  # not found on accessible page
+
+    warnings = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_check_one, p): p for p in pairs_with_struct}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                warnings.append(
+                    f"⚠ Структурный элемент «{result['struct_el']}» не найден на странице:\n"
+                    f"  Полное наименование: {result['doc_name'] or '—'}\n"
+                    f"  URL2: {result['url2']}\n"
+                    f"  (страница доступна, но элемент не обнаружен в тексте — проверьте вручную)"
+                )
+    if warnings:
+        print(f"\n── Structural Element Check Часть {part_number}: "
+              f"{len(warnings)} предупреждений (не блокируют capture) ──")
+        for w in warnings:
+            print(w)
+    return warnings
+
+
 def audit_url2_titles(text: str, timeout: int = 6, max_workers: int = 10) -> list[dict]:
     """Parse all (URL2, Заголовок страницы URL2) pairs in *text*, fetch each URL
     in parallel (up to *max_workers* concurrent requests), compare titles.
@@ -8048,6 +8134,7 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
     title_audit_errors = check_url2_title_audit_at_capture(content, part_number)
     if title_audit_errors:
         raise RuntimeError("\n".join(title_audit_errors))
+    check_structural_elements_soft(content, part_number)
 
     # Живая верификация URL2: Python сам открывает каждую ссылку и сравнивает
     # реальный <title> страницы с тем что агент написал в «Заголовок страницы URL2».
@@ -8203,6 +8290,7 @@ def cmd_capture_part_03_range(args: argparse.Namespace) -> int:
     title_audit_errors = check_url2_title_audit_at_capture(content, 3)
     if title_audit_errors:
         raise RuntimeError("\n".join(title_audit_errors))
+    check_structural_elements_soft(content, 3)
 
     segment_output_path = get_part_03_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
@@ -8293,6 +8381,7 @@ def cmd_capture_part_04_range(args: argparse.Namespace) -> int:
     title_audit_errors = check_url2_title_audit_at_capture(content, 4)
     if title_audit_errors:
         raise RuntimeError("\n".join(title_audit_errors))
+    check_structural_elements_soft(content, 4)
 
     segment_output_path = get_part_04_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
@@ -8382,6 +8471,7 @@ def cmd_capture_part_05_range(args: argparse.Namespace) -> int:
     title_audit_errors = check_url2_title_audit_at_capture(content, 5)
     if title_audit_errors:
         raise RuntimeError("\n".join(title_audit_errors))
+    check_structural_elements_soft(content, 5)
 
     segment_output_path = get_part_05_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
