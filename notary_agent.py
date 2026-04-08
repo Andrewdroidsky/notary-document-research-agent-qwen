@@ -6980,6 +6980,23 @@ def normalize_final_part_content(content: str) -> str:
     return normalized
 
 
+_SERVICE_MARKER_RE = re.compile(
+    r"^\s*(?:"
+    r">>>\s*ПОИСК[^\n]*"
+    r"|Продолжаю верификацию через web_fetch[^\n]*"
+    r"|\[WEBFETCH-(?:ПОДТВЕРЖДЕНИЕ|ДЕКЛАРАЦИЯ)\][^\n]*"
+    r")\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def strip_service_markers(content: str) -> str:
+    """Remove fetch-and-log protocol markers that must not appear in final output."""
+    cleaned = _SERVICE_MARKER_RE.sub("", content)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned
+
+
 def strip_leading_part_heading(content: str, part_number: int) -> str:
     lines = content.splitlines()
     if not lines:
@@ -7003,7 +7020,8 @@ def strip_leading_part_heading(content: str, part_number: int) -> str:
 
 def render_final_part_block(part_number: int, content: str) -> str:
     title = FINAL_PART_TITLES.get(part_number, f"ЧАСТЬ {part_number}")
-    normalized = normalize_final_part_content(strip_leading_part_heading(content, part_number))
+    cleaned = strip_service_markers(content)
+    normalized = normalize_final_part_content(strip_leading_part_heading(cleaned, part_number))
     return f"## ЧАСТЬ {part_number}. {title}\n\n{normalized}"
 
 
