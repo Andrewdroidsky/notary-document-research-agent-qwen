@@ -363,6 +363,25 @@ web_fetch с реальных страниц. Ни одна ссылка не б
 и не взята из памяти модели.
 ================================================================"""
 
+DRAFT_CAPTURE_MANDATE = """================================================================
+ОБЯЗАТЕЛЬНЫЙ МАНДАТ: ПЕРЕВОД ЧЕРНОВИКА В STAGE-OUTPUTS
+
+После завершения записи draft-part-NN.md выполни ОДНУ команду:
+
+  python notary_agent.py promote-draft <subtopic_id> <N>
+
+Это ЕДИНСТВЕННЫЙ разрешённый способ передать черновик в stage-outputs.
+
+ЗАПРЕЩЕНО: xcopy / copy / Copy-Item / move напрямую в папку 02-stage-outputs/
+ПРИЧИНА: прямое копирование = статус stub_template = UNTRUSTED сборка =
+         final.assembled.UNTRUSTED.md = публикация заблокирована = вся работа потеряна.
+
+promote-draft автоматически:
+1. Находит файл 04-web-plan/draft-part-NN.md
+2. Запускает полную цепочку проверок (Defense 1/2/3, WebFetch Protocol, 1:1, title audit)
+3. При успехе: файл получает статус trusted — сборка финала пройдёт штатно
+================================================================"""
+
 FRESH_RUN_TRUSTED_SOURCE_ORIGINS = {
     "execute_part_01",
     "capture_part_output",
@@ -669,8 +688,7 @@ def shorten_subtopic_title(title: str, max_length: int = 46) -> str:
 
 
 def build_published_output_filename(entry: OutlineEntry, suffix: str) -> str:
-    short_title = shorten_subtopic_title(entry.title)
-    return f"{entry.item_id}. {short_title}{suffix}"
+    return f"{entry.item_id}{suffix}"
 
 
 def write_text(path: Path, content: str) -> None:
@@ -3428,10 +3446,11 @@ Capture заблокируется если лог пустой ИЛИ если 
 ```
 
 После каждой найденной карточки дописывай её в этот файл через Write tool.
-Это защищает от потери данных при сбое сессии. Финальный .docx будет собран из всех захваченных частей отдельной командой.
+Это защищает от потери данных при сбое сессии.
 
 """
         packet_text += "\n\n" + WEBFETCH_MANDATE
+        packet_text += "\n\n" + DRAFT_CAPTURE_MANDATE
     if 2 <= part_number <= 11:
         packet_text += "\n\n" + SEARCH_LAYERS_MANDATE
     if part_number in (6, 7, 8):
@@ -9754,6 +9773,37 @@ def cmd_fetch_and_log(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_promote_draft(args: argparse.Namespace) -> int:
+    """Promote draft-part-NN.md from 04-web-plan/ to stage-outputs via full capture chain.
+
+    This is the ONLY allowed way to move a draft into stage-outputs.
+    Equivalent to: capture-part-output <id> <N> --source-file 04-web-plan/draft-part-NN.md
+
+    Direct xcopy/copy/Copy-Item to 02-stage-outputs/ is forbidden:
+    it produces stub_template status → UNTRUSTED assembly → publication blocked.
+    """
+    workspace_root = Path(args.workspace_root).resolve()
+    run_workspace = ensure_subtopic_run_workspace(
+        workspace_root=workspace_root,
+        subtopic_id=args.subtopic_id,
+        theme_query=getattr(args, "theme_query", "") or "",
+    )
+    part_number = int(args.part_number)
+    draft_path = run_workspace.web_plan_dir / f"draft-part-{part_number:02d}.md"
+    if not draft_path.exists():
+        print(
+            f"ERROR: черновик не найден: {draft_path}\n"
+            f"Сначала запиши Часть {part_number} в draft-part-{part_number:02d}.md через Write tool.",
+            file=sys.stderr,
+        )
+        return 1
+    # Delegate entirely to the standard capture path
+    args.source_file = str(draft_path)
+    args.clipboard = False
+    print(f"[promote-draft] Продвигаю {draft_path.name} → 02-stage-outputs/part-{part_number:02d}.md")
+    return cmd_capture_part_output(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="md-first notary internship agent")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -10051,6 +10101,20 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_and_log.add_argument("--theme-query")
     fetch_and_log.add_argument("--workspace-root", default=".")
     fetch_and_log.set_defaults(func=cmd_fetch_and_log)
+
+    promote_draft = subparsers.add_parser(
+        "promote-draft",
+        help=(
+            "Promote draft-part-NN.md → stage-outputs via full capture chain. "
+            "ЕДИНСТВЕННЫЙ разрешённый способ передать черновик в stage-outputs. "
+            "Запрещено: xcopy/copy/Copy-Item напрямую в 02-stage-outputs/."
+        ),
+    )
+    promote_draft.add_argument("subtopic_id")
+    promote_draft.add_argument("part_number", type=int)
+    promote_draft.add_argument("--theme-query")
+    promote_draft.add_argument("--workspace-root", default=".")
+    promote_draft.set_defaults(func=cmd_promote_draft)
 
     return parser
 
