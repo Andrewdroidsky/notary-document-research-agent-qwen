@@ -329,6 +329,12 @@ WEBFETCH_MANDATE = """==========================================================
 Только fetch-and-log создаёт доверенные записи (fetched_by_agent=true).
 Записи без fetched_by_agent=true блокируют захват.
 
+ЛОЖНАЯ ЭКОНОМИЯ:
+Написать Часть без fetch-and-log → capture-part пометит UNTRUSTED →
+assemble создаст final.assembled.UNTRUSTED.md → публикация заблокирована →
+переделка всей Части заново.
+Fetch-and-log на 5 карточек = ~2 минуты. Переделка Части = ~20 минут.
+
 При MISMATCH заголовка: причина — URL ведёт на весь документ, а не на конкретную статью.
 Решение: используй URL конкретной статьи с якорем-хэшем.
   НЕВЕРНО: URL2: `https://www.consultant.ru/document/cons_doc_LAW_39570/`
