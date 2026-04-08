@@ -7446,7 +7446,10 @@ def compute_text_metrics(text: str) -> dict[str, int]:
     chars = len(text)
     url1 = sum(1 for line in lines if line.strip().startswith("URL1:"))
     url2 = sum(1 for line in lines if line.strip().startswith("URL2:"))
-    verified_url2 = sum(1 for line in lines if line.strip().startswith("VERIFIED URL2:"))
+    verified_url2 = sum(
+        1 for line in lines
+        if re.search(r"VERIFIED URL2[=:]\s*(ДА|да|YES|yes)", line)
+    )
     document_cards = count_document_cards(text)
     return {
         "words": words,

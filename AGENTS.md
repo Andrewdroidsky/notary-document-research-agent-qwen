@@ -422,6 +422,7 @@ URL2: `https://www.consultant.ru/document/cons_doc_LAW_1581/`
   - `04-output\md`
   - `04-output\docx`
 - Канонические файлы публикуются только с кратким заголовком из Оглавления.
+- Публикация в `04-output` выполняется **исключительно** через команду `assemble-subtopic-final --publish`. Команды `copy`, `xcopy`, `move` и любые другие Shell-команды для копирования файлов в `04-output` **запрещены и избыточны**: `--publish` уже делает это внутри агента. Применение Shell-copy = признак обхода правил.
 
 ## Разделение Ролей: LLM vs notary_agent.py
 
