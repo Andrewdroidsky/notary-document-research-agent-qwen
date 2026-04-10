@@ -3438,7 +3438,25 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
     else:
         lines.insert(
             5,
-            "- Все найденные документы оформлять карточками с `Вид документа`, `Полное наименование`, `Структурный элемент`, `URL1`, `URL2`, `VERIFIED URL2`, `Заголовок страницы URL2`, `Сверка реквизитов` и `Каноническая строка поиска` по мере применимости.",
+            (
+                "⚠ ОБЯЗАТЕЛЬНЫЙ ФОРМАТ КАРТОЧКИ (Части 2–9) — нарушение = БЛОК при capture-part-output:\n"
+                "  Вид документа: ...\n"
+                "  Полное наименование: ...\n"
+                "  Орган принятия: ...\n"
+                "  Дата и номер: ...\n"
+                "  Структурный элемент: ...\n"
+                "  Статус: ...\n"
+                "  Актуальность редакции: ...\n"
+                "  Значение для темы: ...\n"
+                "  URL1: ...\n"
+                "  URL2: ...\n"
+                "  VERIFIED URL2: ДА\n"
+                "  Заголовок страницы URL2: ...\n"
+                "  Сверка реквизитов: ...\n"
+                "Все поля обязательны для каждого документа. "
+                "Сокращённый формат без `Вид документа:` или без `VERIFIED URL2:` = hard block. "
+                "Запрещено использовать строки `Прямой документ:` / `Прямые документы:` — только полные карточки."
+            ),
         )
     lines.extend([reasoning_brief_md, ""])
     boosters = build_followup_part_boosters(part_number)
@@ -5361,6 +5379,27 @@ def check_webfetch_protocol(content: str, part_number: int) -> list[str]:
             "Переработать Часть с нуля, соблюдая мандат."
         )
     return errors
+
+
+def check_full_card_format(content: str, part_number: int) -> list[str]:
+    """Hard block if any card in Parts 2–9 is missing Вид документа or VERIFIED URL2 field."""
+    if part_number < 2 or part_number > 9:
+        return []
+    card_count = content.count("Вид документа:")
+    if card_count == 0:
+        return []  # No cards — other validators handle absence of cards
+    verified_count = len(re.findall(r"(?im)^VERIFIED URL2:", content))
+    if verified_count < card_count:
+        missing = card_count - verified_count
+        return [
+            f"[card-format] БЛОК Часть {part_number}: {missing} из {card_count} карточек "
+            "не содержат поле `VERIFIED URL2:`. "
+            "Каждая карточка обязана использовать полный формат: "
+            "Вид документа, Полное наименование, Орган принятия, Дата и номер, "
+            "Структурный элемент, Статус, Актуальность редакции, Значение для темы, "
+            "URL1, URL2, VERIFIED URL2: ДА, Заголовок страницы URL2, Сверка реквизитов."
+        ]
+    return []
 
 
 def validate_url2_presence_per_document_block(text: str, part_number: int) -> list[str]:
@@ -8392,6 +8431,11 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
     webfetch_errors = check_webfetch_protocol(content, part_number)
     if webfetch_errors:
         raise RuntimeError("\n".join(webfetch_errors))
+
+    # Card format: every card must have Вид документа + VERIFIED URL2
+    card_format_errors = check_full_card_format(content, part_number)
+    if card_format_errors:
+        raise RuntimeError("\n".join(card_format_errors))
 
     # Level 2 — commitment protocol: block if cards exist without search/progress markers.
     grounding_errors = check_search_grounding(content, part_number)
