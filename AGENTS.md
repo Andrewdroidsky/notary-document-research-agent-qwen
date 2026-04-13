@@ -18,9 +18,10 @@
 
 1. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\AGENTS.md`
 2. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\PROJECT_STATE.md`
-3. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\manual-workflow.md`
-4. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\master prompt\Промпт по поиску документов 18.md`
-5. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\Утверждаю.md`
+3. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\VALIDATOR_RULES.md` ← **ОБЯЗАТЕЛЕН перед генерацией каждой Части**
+4. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\manual-workflow.md`
+5. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\master prompt\Промпт по поиску документов 18.md`
+6. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\Утверждаю.md`
 6. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\order\Текст приказа 18  15.11.10..md` как шаблон Приказа. Рабочие приказы по подтемам хранятся в `input\output ready\Тема-<N>-...\02-orders\<subtopic_id>.md
 7. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\User and LLM Interaction in LLM Contest Window.md`
 8. `C:\Users\koper\Downloads\GitHub Projects\Notary Qwen\input\workflow\outline overrides\<номер темы>.md` при наличии
