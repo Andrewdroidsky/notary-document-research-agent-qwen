@@ -477,9 +477,39 @@ PART_02_SOURCE_CASCADE = [
     },
     {
         "rank": 3,
-        "role": "Readable URL2 candidates",
-        "domains": ["consultant.ru", "garant.ru", "docs.cntd.ru"],
-        "usage": "Читаемые источники для VERIFIED URL2 после сверки реквизитов и заголовка страницы.",
+        "role": "Readable URL2 candidates — primary",
+        "domains": ["consultant.ru"],
+        "usage": "Главный читаемый источник для VERIFIED URL2 после сверки реквизитов и заголовка страницы.",
+    },
+    {
+        "rank": 4,
+        "role": "Readable URL2 candidates — secondary",
+        "domains": ["base.garant.ru"],
+        "usage": "Резервный читаемый источник: Гарант. Используется если consultant.ru недоступен или документ там отсутствует.",
+    },
+    {
+        "rank": 5,
+        "role": "Readable URL2 candidates — tertiary",
+        "domains": ["normativ.kontur.ru"],
+        "usage": "Третий по приоритету читаемый источник: Норматив Контур.",
+    },
+    {
+        "rank": 6,
+        "role": "Supplementary legal portals",
+        "domains": ["legalacts.ru"],
+        "usage": "Дополнительный правовой портал для редких или ведомственных актов.",
+    },
+    {
+        "rank": 7,
+        "role": "Supplementary legal portals — fallback",
+        "domains": ["rulaws.ru"],
+        "usage": "Запасной правовой портал при отсутствии документа в рангах 3–6.",
+    },
+    {
+        "rank": 8,
+        "role": "Regional and specialized databases",
+        "domains": ["bazanpa.ru", "xn--h1apee0d.xn--p1ai"],
+        "usage": "Региональные и специализированные базы НПА — последний каскадный слой перед понижением статуса карточки.",
     },
 ]
 
