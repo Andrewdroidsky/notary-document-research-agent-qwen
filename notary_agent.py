@@ -10208,7 +10208,7 @@ def cmd_fetch_and_log(args: argparse.Namespace) -> int:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # Auto-write >>> ПОИСК: marker into the active draft file for 1:1 grounding
-    draft_candidates = sorted(run_workspace.web_plan_dir.glob("draft-part-*.md"))
+    draft_candidates = sorted(run_workspace.web_plan_dir.glob("draft-part-*.md"), key=lambda p: p.stat().st_mtime)
     if draft_candidates:
         active_draft = draft_candidates[-1]
         try:
