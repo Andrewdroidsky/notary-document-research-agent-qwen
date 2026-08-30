@@ -349,6 +349,20 @@ Fetch-and-log на 5 карточек = ~2 минуты. Переделка Ча
   ВЕРНО:   URL2: `https://www.consultant.ru/document/cons_doc_LAW_39570/cabd43bd.../`
 fetch-and-log вернёт заголовок статьи — вставь его в «Заголовок страницы URL2».
 
+КРИТИЧЕСКОЕ ПРАВИЛО — 1 fetch-and-log = 1 карточка:
+URL2 и «Заголовок страницы URL2» в каждой карточке берутся ТОЛЬКО из результата
+fetch-and-log, выполненного для этого конкретного документа прямо сейчас.
+ЗАПРЕЩЕНО:
+- брать URL2 из памяти или из контекста предыдущей карточки;
+- копировать URL2 от похожего документа или соседней карточки;
+- подставлять URL2 «на глаз» без предшествующего fetch-and-log для этого документа.
+
+Сверка реквизитов — обязательная проверка перед записью VERIFIED URL2: ДА:
+Заголовок страницы (из fetch-and-log) совпадает с наименованием акта в карточке?
+- Совпадает → VERIFIED URL2: ДА
+- Не совпадает → VERIFIED URL2: НЕТ; в поле «Сверка реквизитов» указать расхождение явно.
+Нельзя писать VERIFIED URL2: ДА если заголовок страницы не соответствует наименованию.
+
 Эти маркеры (>>> ПОИСК и "Продолжаю верификацию через web_fetch") должны
 присутствовать ВНУТРИ текста Части — не как отдельные сообщения в чат,
 а прямо в теле ответа между блоками карточек. Они попадают в захват и
@@ -363,6 +377,46 @@ web_fetch с реальных страниц. Ни одна ссылка не б
 страниц источников. Каждая ссылка соответствует полному наименованию документа
 и структурному элементу, указанным в карточке. Ни одна ссылка не сконструирована
 и не взята из памяти модели.
+================================================================"""
+
+FETCH_EACH_URL2_BEFORE_WRITE = """================================================================
+⚠ ЖЕЛЕЗНОЕ ПРАВИЛО: КАЖДЫЙ URL2 — ТОЛЬКО ЧЕРЕЗ web_fetch ПЕРЕД ЗАПИСЬЮ
+
+Это правило НЕОТМЕНИМО. Нарушение = MISMATCH при сборке = 21 санированная
+ссылка в финальном файле = брак работы.
+
+АЛГОРИТМ ДЛЯ КАЖДОЙ КАРТОЧКИ (строго по шагам, без пропусков):
+
+ШАГ 1. web_search → получил URL-кандидат.
+ШАГ 2. web_fetch ЭТОГО URL → открыл страницу.
+ШАГ 3. УВИДЕЛ заголовок страницы. СКОПИРОВАЛ его полностью, без сокращений.
+ШАГ 4. Вставил скопированный заголовок в поле «Заголовок страницы URL2» карточки.
+ШАГ 5. ТОЛЬКО ТЕПЕРЬ вписал URL2 в карточку.
+
+ЗАПРЕЩЕНО:
+❌ Угадывать заголовок страницы по названию документа.
+❌ Сокращать заголовок страницы.
+❌ Писать URL2 в карточку БЕЗ предшествующего web_fetch этой ссылки.
+❌ Писать карточки пачкой, а web_fetch делать потом или вообще не делать.
+❌ Копировать URL2 из другой карточки или из предыдущей подтемы.
+❌ Писать пустой «Заголовок страницы URL2» или оставлять поле пустым.
+
+ПРАВИЛЬНЫЙ ЦИКЛ (один документ):
+  web_search → web_fetch("https://...") → увидел заголовок → записал карточку →
+  web_search → web_fetch("https://...") → увидел заголовок → записал карточку → ...
+
+НЕПРАВИЛЬНЫЙ ЦИКЛ (блок):
+  web_search × 10 → написал 10 карточек → потом web_fetch (или вообще забыл).
+
+Если заголовок страницы ДЛИННЫЙ и содержит название сайта — пиши ВЕСЬ заголовок.
+Пример ПРАВИЛЬНОГО «Заголовок страницы URL2»:
+  «Приказ Минюста России от 30.09.2020 N 222 "Об утверждении Порядка..." \ КонсультантПлюс»
+
+Это НЕ MISMATCH — это реальный заголовок страницы.
+
+Причина предыдущих провалов: LLM экономил шаги и писал карточки без web_fetch,
+а заголовки угадывал/сокращал. Результат: 21 MISMATCH из 53 ссылок.
+Это НЕДОПУСТИМО. Каждый URL2 — только через реальный web_fetch.
 ================================================================"""
 
 DRAFT_CAPTURE_MANDATE = """================================================================
@@ -425,9 +479,39 @@ PART_02_SOURCE_CASCADE = [
     },
     {
         "rank": 3,
-        "role": "Readable URL2 candidates",
-        "domains": ["consultant.ru", "garant.ru", "docs.cntd.ru", "bazanpa.ru"],
-        "usage": "Читаемые источники для VERIFIED URL2 после сверки реквизитов и заголовка страницы.",
+        "role": "Readable URL2 candidates — primary",
+        "domains": ["consultant.ru"],
+        "usage": "Главный читаемый источник для VERIFIED URL2 после сверки реквизитов и заголовка страницы.",
+    },
+    {
+        "rank": 4,
+        "role": "Readable URL2 candidates — secondary",
+        "domains": ["base.garant.ru"],
+        "usage": "Резервный читаемый источник: Гарант. Используется если consultant.ru недоступен или документ там отсутствует.",
+    },
+    {
+        "rank": 5,
+        "role": "Readable URL2 candidates — tertiary",
+        "domains": ["normativ.kontur.ru"],
+        "usage": "Третий по приоритету читаемый источник: Норматив Контур.",
+    },
+    {
+        "rank": 6,
+        "role": "Supplementary legal portals",
+        "domains": ["legalacts.ru"],
+        "usage": "Дополнительный правовой портал для редких или ведомственных актов.",
+    },
+    {
+        "rank": 7,
+        "role": "Supplementary legal portals — fallback",
+        "domains": ["rulaws.ru"],
+        "usage": "Запасной правовой портал при отсутствии документа в рангах 3–6.",
+    },
+    {
+        "rank": 8,
+        "role": "Regional and specialized databases",
+        "domains": ["bazanpa.ru", "xn--h1apee0d.xn--p1ai"],
+        "usage": "Региональные и специализированные базы НПА — последний каскадный слой перед понижением статуса карточки.",
     },
 ]
 
@@ -830,6 +914,12 @@ def parse_markdown_table_row(line: str) -> list[str]:
 def copy_if_exists(source: Path, dest: Path) -> None:
     if not source.exists():
         return
+    # FIX WinError 32: не копировать файл сам в себя (source и dest — один и тот же файл)
+    try:
+        if source.resolve() == dest.resolve():
+            return
+    except OSError:
+        pass
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, dest)
 
@@ -2326,6 +2416,31 @@ def build_part_02_launch_packet(run_workspace: SubtopicRunWorkspace) -> str:
             "**Запрещено:** записывать в лог задним числом после завершения работы.",
             "**Запрещено:** реконструировать лог из памяти модели.",
             "",
+            "## ⚠ ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ (BLOCKER)",
+            "",
+            "Любое утверждение в тексте Части о том, что документы «не выявлены», блок «не применим»,",
+            "слой «пуст» или новых данных «не найдено», считается **результатом работы**,",
+            "а не способом её избежать.",
+            "",
+            "Такой вывод разрешён **только** при условии, что в research-log.jsonl зафиксированы",
+            "записи реальных поисковых запросов (web_search → web_fetch) по соответствующей теме/блоку.",
+            "",
+            "Писать «не выявлено» без предшествующей попытки поиска по релевантным ключевым словам — запрещено.",
+            "Отсутствие результата должно быть доказано наличием процесса поиска.",
+            "",
+            "Если в тексте есть «не выявлено»/«не применимо»/«не найдено»,",
+            "а research-log пуст или не содержит записей поиска — capture будет заблокирован.",
+            "",
+            "## Цикл работы: web_search → web_fetch → карточка",
+            "",
+            "1. Перед **каждой** карточкой документа выполни реальный web_search → web_fetch.",
+            "2. **Немедленно** запиши результат в research-log.jsonl.",
+            "3. Только после успешного web_fetch формируй карточку с VERIFIED URL2.",
+            "4. Не пиши «не выявлено» пока реально не проверил источники.",
+            "5. Честно признавай, когда блок объективно не релевантен, а не пиши «не применимо» чтобы избежать работы.",
+            "",
+            "Этот цикл обязателен для **каждого** документа в Части. Пропуск цикла = обман = блокировка capture.",
+            "",
             "## Прогрессивное сохранение черновика",
             "",
             "Путь черновика для Части 2:",
@@ -2338,6 +2453,8 @@ def build_part_02_launch_packet(run_workspace: SubtopicRunWorkspace) -> str:
             "Это защищает от потери данных при сбое сессии. Финальный .docx будет собран из всех захваченных частей отдельной командой.",
             "",
             WEBFETCH_MANDATE,
+            "",
+            FETCH_EACH_URL2_BEFORE_WRITE,
             "",
             "## Требование к ответу",
             "",
@@ -3375,6 +3492,7 @@ def build_followup_part_boosters(part_number: int) -> list[str]:
             "Мини-конспект должен быть насыщенным и прикладным, а не сухим narrative-текстом.",
             "После каждого пункта мини-конспекта нужно давать копируемые ссылки в code-блоках с полным наименованием документа и структурным элементом для подтверждения содержания этого пункта.",
             "Нумеровать только пункты; строки текста внутри пункта не нумеровать.",
+            "⚠ ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ: если в мини-конспекте утверждается «судебной практики нет» или «дополнительных разъяснений не найдено», это должно быть подтверждено записями в research-log.jsonl.",
         ]
     if part_number == 11:
         return [
@@ -3435,7 +3553,13 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
     elif part_number == 10:
         lines.insert(
             5,
-            "- Для Части 10 после каждого пункта давать копируемые ссылочные code-блоки с полным наименованием документа и структурным элементом.",
+            (
+                "- Для Части 10 после каждого пункта давать копируемые ссылочные блоки с полным наименованием документа, структурным элементом, URL1, URL2.\n"
+                "- URL2 и «Заголовок страницы URL2» для каждого документа берутся ТОЛЬКО из результата fetch-and-log, "
+                "выполненного для этого конкретного документа. Запрещено копировать URL2 из соседнего блока или из памяти.\n"
+                "- Сверка реквизитов: заголовок страницы (из fetch-and-log) совпадает с наименованием акта? "
+                "Совпадает → VERIFIED URL2: ДА. Не совпадает → VERIFIED URL2: НЕТ, расхождение указать явно."
+            ),
         )
     else:
         lines.insert(
@@ -3484,7 +3608,7 @@ def build_followup_part_packet(run_workspace: SubtopicRunWorkspace, part_number:
     packet_text = "\n".join(lines)
     if part_number == 2:
         packet_text += "\n\n" + PART2_ANALYSIS_MANDATE
-    if 2 <= part_number <= 9:
+    if 2 <= part_number <= 10:
         research_log_path = run_workspace.web_plan_dir / "research-log.jsonl"
         draft_path = run_workspace.web_plan_dir / f"draft-part-{part_number:02d}.md"
         packet_text += f"""
@@ -3514,6 +3638,31 @@ Capture заблокируется если лог пустой ИЛИ если 
 **Запрещено:** записывать в лог задним числом после завершения работы.
 **Запрещено:** реконструировать лог из памяти модели.
 
+## ⚠ ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ (BLOCKER)
+
+Любое утверждение в тексте Части о том, что документы «не выявлены», блок «не применим»,
+слой «пуст» или новых данных «не найдено», считается **результатом работы**,
+а не способом её избежать.
+
+Такой вывод разрешён **только** при условии, что в research-log.jsonl зафиксированы
+записи реальных поисковых запросов (web_search → web_fetch) по соответствующей теме/блоку.
+
+Писать «не выявлено» без предшествующей попытки поиска по релевантным ключевым словам — запрещено.
+Отсутствие результата должно быть доказано наличием процесса поиска.
+
+Если в тексте есть «не выявлено»/«не применимо»/«не найдено»,
+а research-log пуст или не содержит записей поиска — capture будет заблокирован.
+
+## Цикл работы: web_search → web_fetch → карточка
+
+1. Перед **каждой** карточкой документа выполни реальный web_search → web_fetch.
+2. **Немедленно** запиши результат в research-log.jsonl.
+3. Только после успешного web_fetch формируй карточку с VERIFIED URL2.
+4. Не пиши «не выявлено» пока реально не проверил источники.
+5. Честно признавай, когда блок объективно не релевантен, а не пиши «не применимо» чтобы избежать работы.
+
+Этот цикл обязателен для **каждого** документа в Части. Пропуск цикла = обман = блокировка capture.
+
 ## Прогрессивное сохранение черновика
 
 Путь черновика для текущей части:
@@ -3527,6 +3676,7 @@ Capture заблокируется если лог пустой ИЛИ если 
 
 """
         packet_text += "\n\n" + WEBFETCH_MANDATE
+        packet_text += "\n\n" + FETCH_EACH_URL2_BEFORE_WRITE
         packet_text += "\n\n" + DRAFT_CAPTURE_MANDATE
     if 2 <= part_number <= 11:
         packet_text += "\n\n" + SEARCH_LAYERS_MANDATE
@@ -3987,6 +4137,8 @@ def build_part_03_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
             "Вернуть только ответ по этому диапазону Части 3 без перезапуска Части 2 и без перехода к следующему диапазону.",
             "",
             WEBFETCH_MANDATE,
+            "",
+            FETCH_EACH_URL2_BEFORE_WRITE,
             "",
         ]
     )
@@ -4655,6 +4807,68 @@ def find_foreign_subtopic_ids(text: str, expected_subtopic_id: str) -> list[str]
     return sorted(candidate for candidate in candidates if candidate != expected_subtopic_id)
 
 
+def check_reasonable_absence_rule(content: str, research_log_path: Path) -> list[str]:
+    """Проверяет ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ.
+    
+    Любое утверждение «не выявлено»/«не применимо»/«не найдено» должно быть
+    подтверждено реальным поиском в research-log.jsonl.
+    
+    Возвращает список проблем или пустой список.
+    """
+    issues: list[str] = []
+    lowered = content.lower()
+    
+    # Ключевые фразы, требующие подтверждения поиском
+    absence_markers = [
+        "не выявлено",
+        "не применимо",
+        "не найдено",
+        "отсутствуют документы",
+        "документы не выявлены",
+        "пуст",
+    ]
+    
+    # Проверяем, есть ли в тексте такие фразы
+    has_absence_claim = any(marker in lowered for marker in absence_markers)
+    if not has_absence_claim:
+        return issues
+    
+    # Проверяем research-log
+    if not research_log_path.exists() or research_log_path.stat().st_size == 0:
+        issues.append(
+            "[reasonable-absence] БЛОК: в тексте есть утверждения об отсутствии документов "
+            "(«не выявлено»/«не применимо»/«не найдено»), но research-log.jsonl пуст или отсутствует. "
+            "Отсутствие результата должно быть доказано наличием процесса поиска."
+        )
+        return issues
+    
+    # Считаем количество записей поиска в research-log
+    search_count = 0
+    with open(research_log_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                tool = entry.get("tool", "")
+                if tool in ("web_search", "web_fetch") and entry.get("fetched_by_agent") is True:
+                    search_count += 1
+            except json.JSONDecodeError:
+                continue
+    
+    # Если есть утверждения об отсутствии, но нет записей поиска — это обман
+    if search_count == 0:
+        issues.append(
+            "[reasonable-absence] БЛОК: в тексте есть утверждения «не выявлено»/«не применимо»/«не найдено», "
+            "но в research-log нет записей реального поиска (web_search/web_fetch). "
+            "Писать «не выявлено» без предшествующей попытки поиска запрещено. "
+            "Отсутствие результата должно быть доказано наличием процесса поиска."
+        )
+    
+    return issues
+
+
 def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, text: str) -> list[str]:
     issues: list[str] = []
     stripped = text.strip()
@@ -4709,6 +4923,10 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
             if not has_structural_element_marker(quarantine_block):
                 issues.append("Part 2 quarantine entries must include a structural element marker")
         issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
+        # ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ
+        issues.extend(check_reasonable_absence_rule(
+            stripped, run_workspace.web_plan_dir / "research-log.jsonl"
+        ))
 
     if part_number == 3:
         issues.extend(validate_part_03_canonical_structure(stripped))
@@ -4719,6 +4937,10 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
             )
         issues.extend(validate_part_03_applicable_blocks_have_url2(stripped))
         issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
+        # ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ
+        issues.extend(check_reasonable_absence_rule(
+            stripped, run_workspace.web_plan_dir / "research-log.jsonl"
+        ))
 
     if part_number == 4:
         status_count = stripped.count("Статус:")
@@ -4730,6 +4952,10 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
                 f"Part 4 with at least 3 `Статус:` markers must contain at least 3 `URL2:` lines; found only {url2_count}"
             )
         issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
+        # ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ
+        issues.extend(check_reasonable_absence_rule(
+            stripped, run_workspace.web_plan_dir / "research-log.jsonl"
+        ))
 
     if part_number == 5:
         status_count = stripped.count("Статус:")
@@ -4739,6 +4965,10 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
         if status_count > 0 and url2_count == 0:
             issues.append("Part 5 with `Статус:` markers must contain at least one `URL2:` line")
         issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
+        # ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ
+        issues.extend(check_reasonable_absence_rule(
+            stripped, run_workspace.web_plan_dir / "research-log.jsonl"
+        ))
 
     if part_number in {6, 7, 8, 9}:
         first_nonempty = next((line.strip() for line in stripped.splitlines() if line.strip()), "")
@@ -4775,6 +5005,10 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
                 elif not match.group(1).strip():
                     issues.append(f"Part {part_number} card #{index} has empty required field `{label}`")
         issues.extend(validate_url2_presence_per_document_block(stripped, part_number))
+        # ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ
+        issues.extend(check_reasonable_absence_rule(
+            stripped, run_workspace.web_plan_dir / "research-log.jsonl"
+        ))
 
     if part_number == 10:
         items = extract_top_level_arabic_items(stripped)
@@ -4792,6 +5026,10 @@ def validate_part_output(run_workspace: SubtopicRunWorkspace, part_number: int, 
         if part10_words > 2500:
             issues.append(f"Part 10 is too long: {part10_words} words, max 2500")
         issues.extend(validate_part_10_item_level_url2(stripped))
+        # ПРАВИЛО ОБОСНОВАННОГО ОТСУТСТВИЯ
+        issues.extend(check_reasonable_absence_rule(
+            stripped, run_workspace.web_plan_dir / "research-log.jsonl"
+        ))
 
     if part_number == 11:
         items = extract_top_level_arabic_items(stripped)
@@ -5489,6 +5727,10 @@ def part_03_block_is_explicitly_not_applicable(block_text: str) -> bool:
         "не применимо",
         "не относится",
         "не релевант",
+        "не выявлено",
+        "не найдено",
+        "отсутствуют документы",
+        "документы не выявлены",
     ]
     return any(marker in lowered for marker in negative_markers)
 
@@ -5764,6 +6006,8 @@ def build_part_04_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
             "",
             WEBFETCH_MANDATE,
             "",
+            FETCH_EACH_URL2_BEFORE_WRITE,
+            "",
         ]
     )
     return "\n".join(lines)
@@ -5982,6 +6226,8 @@ def build_part_05_message(run_workspace: SubtopicRunWorkspace, segment: dict[str
             "Вернуть только ответ по этому диапазону Части 5 без перезапуска предыдущих частей и без перехода к следующему диапазону.",
             "",
             WEBFETCH_MANDATE,
+            "",
+            FETCH_EACH_URL2_BEFORE_WRITE,
             "",
         ]
     )
@@ -9788,10 +10034,146 @@ def cmd_batch_run(args: argparse.Namespace) -> int:
     return 0
 
 
+# Canonical skeleton for Part 4 — 18 organs from Приказ §3.1.
+# The agent MUST fill content under each heading; headings themselves are frozen.
+_PART4_SKELETON = """\
+## 1. Росфинмониторинг
+
+<!-- карточки документов или: не выявлено -->
+
+## 2. Банк России
+
+<!-- карточки документов или: не выявлено -->
+
+## 3. Акты Федеральной Нотариальной Палаты
+
+<!-- карточки документов или: не выявлено -->
+
+## 4. Акты нотариальных палат субъектов
+
+<!-- карточки документов или: не выявлено -->
+
+## 5. Методические материалы/рекомендации (в составе акта ФНП)
+
+<!-- карточки документов или: не выявлено -->
+
+## 6. Росреестр
+
+<!-- карточки документов или: не выявлено -->
+
+## 7. Федеральная налоговая служба
+
+<!-- карточки документов или: не выявлено -->
+
+## 8. Минюст РФ/терорганы
+
+<!-- карточки документов или: не выявлено -->
+
+## 9. МВД
+
+<!-- карточки документов или: не выявлено -->
+
+## 10. Минфин
+
+<!-- карточки документов или: не выявлено -->
+
+## 11. ФОИВ (Федеральные органы исполнительной власти)
+
+<!-- карточки документов или: не выявлено -->
+
+## 12. Правительство РФ
+
+<!-- карточки документов или: не выявлено -->
+
+## 13. Президент РФ
+
+<!-- карточки документов или: не выявлено -->
+
+## 14. ГОСТ/Росстандарт
+
+<!-- карточки документов или: не выявлено -->
+
+## 15. Архивные правила
+
+<!-- карточки документов или: не выявлено -->
+
+## 16. Персональные данные/ИБ
+
+<!-- карточки документов или: не выявлено -->
+
+## 17. Электронная подпись
+
+<!-- карточки документов или: не выявлено -->
+
+## 18. Иное
+
+<!-- карточки документов или: не выявлено -->
+"""
+
+# Canonical skeleton for Part 5 — 6 layers from Приказ §6.1.
+_PART5_SKELETON = """\
+## слой 1: базовые кодексы/законы
+
+<!-- карточки документов или: не выявлено -->
+
+## слой 2: специальное нотариальное регулирование
+
+<!-- карточки документов или: не выявлено -->
+
+## слой 3: процессуальный/контрольный слой
+
+<!-- карточки документов или: не выявлено -->
+
+## слой 4: подзаконные НПА уполномоченных органов
+
+<!-- карточки документов или: не выявлено -->
+
+## слой 5: акты нотариального сообщества
+
+<!-- карточки документов или: не выявлено -->
+
+## слой 6: судебные разъяснения
+
+<!-- карточки документов или: не выявлено -->
+"""
+
+# Validation markers — promote-draft checks these strings are present in the draft.
+_PART4_REQUIRED_HEADINGS = [
+    "## 1. Росфинмониторинг",
+    "## 2. Банк России",
+    "## 3. Акты Федеральной Нотариальной Палаты",
+    "## 4. Акты нотариальных палат субъектов",
+    "## 5. Методические материалы/рекомендации (в составе акта ФНП)",
+    "## 6. Росреестр",
+    "## 7. Федеральная налоговая служба",
+    "## 8. Минюст РФ/терорганы",
+    "## 9. МВД",
+    "## 10. Минфин",
+    "## 11. ФОИВ (Федеральные органы исполнительной власти)",
+    "## 12. Правительство РФ",
+    "## 13. Президент РФ",
+    "## 14. ГОСТ/Росстандарт",
+    "## 15. Архивные правила",
+    "## 16. Персональные данные/ИБ",
+    "## 17. Электронная подпись",
+    "## 18. Иное",
+]
+
+_PART5_REQUIRED_HEADINGS = [
+    "## слой 1:",
+    "## слой 2:",
+    "## слой 3:",
+    "## слой 4:",
+    "## слой 5:",
+    "## слой 6:",
+]
+
+
 def cmd_init_part_draft(args: argparse.Namespace) -> int:
     """Create draft-part-NN.md with [WEBFETCH-ДЕКЛАРАЦИЯ] pre-seeded as first line.
 
     This guarantees the marker is present before the agent writes any cards.
+    Parts 4 and 5 also receive their canonical structural skeletons.
     Use this before starting each Part 2–9 draft.
     """
     subtopic_id = args.subtopic_id
@@ -9812,6 +10194,8 @@ def cmd_init_part_draft(args: argparse.Namespace) -> int:
 
     draft_path = run_workspace.web_plan_dir / f"draft-part-{part_number:02d}.md"
     declaration = "[WEBFETCH-ДЕКЛАРАЦИЯ]\n"
+    skeletons: dict[int, str] = {4: _PART4_SKELETON, 5: _PART5_SKELETON}
+    skeleton = skeletons.get(part_number, "")
 
     if draft_path.exists():
         existing = read_text(draft_path)
@@ -9824,8 +10208,11 @@ def cmd_init_part_draft(args: argparse.Namespace) -> int:
         print(f"[init-part-draft] WARNING: {draft_path.name} уже существовал без маркера — маркер дописан в начало")
     else:
         with open(draft_path, "w", encoding="utf-8") as f:
-            f.write(declaration)
-        print(f"[init-part-draft] Создан {draft_path.name} с [WEBFETCH-ДЕКЛАРАЦИЯ]")
+            f.write(declaration + skeleton)
+        if skeleton:
+            print(f"[init-part-draft] Создан {draft_path.name} с [WEBFETCH-ДЕКЛАРАЦИЯ] + канонический скелет Части {part_number}")
+        else:
+            print(f"[init-part-draft] Создан {draft_path.name} с [WEBFETCH-ДЕКЛАРАЦИЯ]")
 
     return 0
 
@@ -9833,12 +10220,17 @@ def cmd_init_part_draft(args: argparse.Namespace) -> int:
 def _auto_init_part_drafts(run_workspace: "SubtopicRunWorkspace") -> None:
     """Auto-create draft-part-02.md … draft-part-09.md with [WEBFETCH-ДЕКЛАРАЦИЯ] pre-seeded.
 
+    Parts 4 and 5 also receive their canonical structural skeletons so the agent
+    cannot invent alternative headings — the frozen structure is already in the file.
+
     Called automatically inside cmd_prepare_part_02_web so the marker is
     guaranteed to exist before the agent opens any draft file.
     """
+    declaration = "[WEBFETCH-ДЕКЛАРАЦИЯ]\n"
+    skeletons: dict[int, str] = {4: _PART4_SKELETON, 5: _PART5_SKELETON}
     for n in range(2, 10):
         draft_path = run_workspace.web_plan_dir / f"draft-part-{n:02d}.md"
-        declaration = "[WEBFETCH-ДЕКЛАРАЦИЯ]\n"
+        skeleton = skeletons.get(n, "")
         if draft_path.exists():
             existing = read_text(draft_path)
             if "[WEBFETCH-ДЕКЛАРАЦИЯ]" not in existing:
@@ -9847,8 +10239,9 @@ def _auto_init_part_drafts(run_workspace: "SubtopicRunWorkspace") -> None:
                 print(f"[auto-init-drafts] Маркер дописан в начало существующего {draft_path.name}")
         else:
             with open(draft_path, "w", encoding="utf-8") as f:
-                f.write(declaration)
-            print(f"[auto-init-drafts] Создан {draft_path.name}")
+                f.write(declaration + skeleton)
+            label = " + skeleton" if skeleton else ""
+            print(f"[auto-init-drafts] Создан {draft_path.name}{label}")
 
 
 def cmd_fetch_and_log(args: argparse.Namespace) -> int:
@@ -9964,7 +10357,7 @@ def cmd_fetch_and_log(args: argparse.Namespace) -> int:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # Auto-write >>> ПОИСК: marker into the active draft file for 1:1 grounding
-    draft_candidates = sorted(run_workspace.web_plan_dir.glob("draft-part-*.md"))
+    draft_candidates = sorted(run_workspace.web_plan_dir.glob("draft-part-*.md"), key=lambda p: p.stat().st_mtime)
     if draft_candidates:
         active_draft = draft_candidates[-1]
         try:
@@ -10029,6 +10422,26 @@ def cmd_promote_draft(args: argparse.Namespace) -> int:
             with open(draft_path, "a", encoding="utf-8") as f:
                 f.write("\n[WEBFETCH-ПОДТВЕРЖДЕНИЕ]\n")
             print(f"[promote-draft] [WEBFETCH-ПОДТВЕРЖДЕНИЕ] дописан автоматически → {draft_path.name}")
+
+    # Structural skeleton validation for Parts 4 and 5.
+    skeleton_checks: dict[int, list[str]] = {
+        4: _PART4_REQUIRED_HEADINGS,
+        5: _PART5_REQUIRED_HEADINGS,
+    }
+    if part_number in skeleton_checks:
+        content = read_text(draft_path)
+        required = skeleton_checks[part_number]
+        missing = [h for h in required if h not in content]
+        if missing:
+            print(
+                f"ERROR [promote-draft] Часть {part_number}: отсутствуют обязательные заголовки структуры.\n"
+                f"Пропущено {len(missing)} из {len(required)} пунктов:\n"
+                + "\n".join(f"  — {h}" for h in missing)
+                + f"\n\nДобавь недостающие разделы в {draft_path.name} и повтори promote-draft.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"[promote-draft] Структура Части {part_number}: все {len(required)} заголовков присутствуют. OK.")
 
     # Delegate entirely to the standard capture path
     args.source_file = str(draft_path)
