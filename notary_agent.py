@@ -5176,8 +5176,12 @@ def check_research_log_url_authenticity(research_log_path: Path, sample_size: in
                 continue
             try:
                 entry = json.loads(line)
-                if entry.get("agent_supplied"):
-                    continue  # agent-supplied entries are pre-verified — skip Defense 1
+                # agent_supplied entries are included in this sample too (as of
+                # 30.08.2026): the WinError 10013 that motivated skipping them was
+                # traced to the coding-agent sandbox's socket policy, not to
+                # urllib/python.exe specifically — an out-of-sandbox rerun of the
+                # identical request succeeded. See AGENTS.md / fetch-protocol.md
+                # for the sandbox-approval requirement this restores.
                 for field in ("url_fetched", "fetch_url", "url"):
                     val = entry.get(field, "")
                     if isinstance(val, str) and val.startswith("http"):
@@ -5263,8 +5267,8 @@ def check_research_log_timestamp_clustering(research_log_path: Path) -> list[str
                 continue
             try:
                 entry = json.loads(line)
-                if entry.get("agent_supplied"):
-                    continue  # agent-supplied entries are pre-verified — skip Defense 3
+                # agent_supplied entries are included here too (as of 30.08.2026) —
+                # see the matching note in check_research_log_url_authenticity above.
                 ts_raw = entry.get("timestamp", "")
                 if not ts_raw:
                     continue
@@ -10254,9 +10258,14 @@ def cmd_fetch_and_log(args: argparse.Namespace) -> int:
 
     Agent-supplied mode (--title / --preview):
       Pass the page title and content preview from your own web_fetch result.
-      No local HTTP request is made — WinError 10013 is excluded.
-      The entry is written with agent_supplied=true which exempts it from
-      Defense 1 (URL authenticity re-fetch) and Defense 3 (timestamp clustering).
+      No local HTTP request is made at write time — avoids WinError 10013
+      when the coding-agent sandbox blocks the socket. The entry is written
+      with agent_supplied=true; as of 30.08.2026 this no longer exempts the
+      entry from Defense 1 (URL authenticity re-fetch) or Defense 3
+      (timestamp clustering) — both now sample agent_supplied entries too.
+      WinError 10013 was traced to the sandbox's network policy, not to
+      urllib itself: approve the sandbox's network-access prompt when it
+      appears instead of relying on this bypass alone. See AGENTS.md.
     """
     subtopic_id = args.subtopic_id
     url = args.url
