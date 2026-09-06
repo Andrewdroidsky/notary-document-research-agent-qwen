@@ -7645,12 +7645,146 @@ def check_url2_title_audit_at_capture(content: str, part_number: int) -> list[st
     return errors
 
 
+class _VisibleTextExtractor(html.parser.HTMLParser):
+    """Collects visible text only — skips <script>/<style> content and strips
+    all tags. Needed because raw-HTML substring search misses real matches
+    when markup splits a phrase across tags (e.g. `<b>Статья</b> 57` — a
+    literal search for "статья 57" fails even though the element is right
+    there on the page). Ported from the sibling notary-document-research-agent
+    branch (same repo family, 2026-09-06) — stdlib only, no external HTML
+    library, matching this project's existing dependency footprint.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        self._skip_depth = 0
+        self.chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag.lower() in ("script", "style"):
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in ("script", "style") and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self.chunks.append(data)
+
+
+def _html_to_visible_text(html_source: str) -> str:
+    parser = _VisibleTextExtractor()
+    try:
+        parser.feed(html_source)
+    except Exception:
+        return html_source  # Malformed markup — fall back to raw source rather than losing the fetch.
+    text = " ".join(parser.chunks)
+    return re.sub(r"[\s\xa0]+", " ", text)
+
+
+def _fetch_page_text(url: str, timeout: int = 8) -> tuple[str, str]:
+    """Shared fetch for structural-element checks (soft heuristic below and
+    the content-support/freshness hard-block escalations). Returns VISIBLE
+    TEXT, not raw HTML — see _html_to_visible_text for why the stripping
+    matters. Hoisted to module level (was a nested closure inside
+    check_structural_elements_soft) so it can be shared with the new checks
+    below without duplication.
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            charset = resp.headers.get_content_charset() or "utf-8"
+            raw = resp.read(262144)
+            return (_html_to_visible_text(raw.decode(charset, errors="replace")), "ok")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return ("", "blocked")
+        return ("", "error")
+    except Exception:
+        return ("", "timeout")
+
+
+_STRUCT_KEYWORD_PATTERNS = {
+    # base form -> regex fragment tolerant of Russian case endings, since a
+    # compound reference genitive-inflects the inner keyword
+    # ("часть 2 статьи 57" — "статьи", not "статья").
+    "статья": "стать[яи]",
+    "пункт": "пункт[ае]?",
+    "часть": "част[ьи]",
+    "глава": "глав[аы]",
+    "раздел": "раздел[а]?",
+    "параграф": "параграф[а]?",
+    "подпункт": "подпункт[ае]?",
+    "приложение": "приложени[ея]",
+}
+_STRUCT_KEYWORD_ABBREVS = {
+    "статья": ["ст."], "пункт": ["п."], "часть": ["ч."], "глава": ["гл."],
+    "раздел": ["разд."], "параграф": ["§"], "подпункт": ["пп.", "подп."],
+    "приложение": ["прил."],
+}
+
+
+def _struct_el_variants(struct_el: str) -> list[str]:
+    """Candidate substrings for a declared structural element ("Статья 57",
+    "часть 2 статьи 57", "п. 3 ст. 22.1", ...). Covers the plain keyword+number
+    form, standard abbreviations, Russian case endings on the keyword, and
+    compound "часть/пункт X статьи Y" refs — extend this list as real
+    false-negative cases turn up (same discipline as the AGENTS.md source
+    cascade: grown from real cases, not designed exhaustively up front)
+    rather than reintroducing a judge call for it.
+    """
+    el = re.sub(r"\s+", " ", struct_el.strip())
+    variants = [el, el.lower()]
+    any_keyword = "|".join(_STRUCT_KEYWORD_PATTERNS.values())
+
+    def _add_abbrev_variants(base_keyword: str, num: str) -> None:
+        for abbr in _STRUCT_KEYWORD_ABBREVS.get(base_keyword, []):
+            variants.append(f"{abbr}{num}")
+            variants.append(f"{abbr} {num}")
+
+    def _base_keyword_for(matched_word: str) -> str | None:
+        lowered = matched_word.lower()
+        for base, pattern in _STRUCT_KEYWORD_PATTERNS.items():
+            if re.fullmatch(pattern, lowered, re.IGNORECASE):
+                return base
+        return None
+
+    m = re.match(rf"^({any_keyword})\s+(\S+)", el, re.IGNORECASE)
+    if m:
+        base = _base_keyword_for(m.group(1))
+        if base:
+            _add_abbrev_variants(base, m.group(2))
+
+    m_compound = re.match(
+        rf"^(?:{any_keyword})\s+\S+\s+({any_keyword})\s+(\S+)", el, re.IGNORECASE
+    )
+    if m_compound:
+        inner_base = _base_keyword_for(m_compound.group(1))
+        inner_num = m_compound.group(2)
+        if inner_base:
+            variants.append(f"{inner_base} {inner_num}")
+            _add_abbrev_variants(inner_base, inner_num)
+
+    return variants
+
+
 def check_structural_elements_soft(content: str, part_number: int) -> list[str]:
     """Soft (advisory) check: for each card whose URL2 is accessible, search the page
     text for the declared structural element (статья X, пункт X.X, etc.).
-    Not found on accessible page → warning with doc name + struct_el + URL2.
-    Blocked/timeout pages → silently skipped (UNVERIFIED).
-    Never blocks capture — returns warnings only.
+    Not found on accessible page -> warning with doc name + struct_el + URL2.
+    Blocked/timeout pages -> silently skipped (UNVERIFIED).
+    Never blocks capture -- returns warnings only. This is stage 1 (cheap,
+    deterministic, no LLM) of the two-stage content-support check -- stage 2
+    (hard-blocking) is check_structural_elements_content_support below.
     """
     import concurrent.futures
 
@@ -7661,45 +7795,6 @@ def check_structural_elements_soft(content: str, part_number: int) -> list[str]:
     pairs_with_struct = [p for p in pairs if p.get("struct_el") and p.get("url2")]
     if not pairs_with_struct:
         return []
-
-    def _fetch_page_text(url: str, timeout: int = 8) -> tuple[str, str]:
-        """Fetch up to 256KB of page text for structural element search."""
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
-            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        }
-        req = urllib.request.Request(url, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                charset = resp.headers.get_content_charset() or "utf-8"
-                raw = resp.read(262144)  # 256KB — captures TOC and article headings
-                return (raw.decode(charset, errors="replace"), "ok")
-        except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
-                return ("", "blocked")
-            return ("", "error")
-        except Exception:
-            return ("", "timeout")
-
-    def _struct_el_variants(struct_el: str) -> list[str]:
-        """Generate search variants for structural element string."""
-        el = struct_el.strip()
-        variants = [el, el.lower()]
-        # "статья 15" → also try "Статья 15", "ст. 15", "ст.15"
-        m = re.match(r"^(статья|пункт|часть|глава|раздел|параграф)\s+(\S+)", el, re.IGNORECASE)
-        if m:
-            keyword, num = m.group(1).lower(), m.group(2)
-            abbrevs = {"статья": ["ст.", "ст "], "пункт": ["п.", "п "], "часть": ["ч.", "ч "],
-                       "глава": ["гл.", "гл "], "раздел": ["разд.", "разд "], "параграф": ["§"]}
-            for abbr in abbrevs.get(keyword, []):
-                variants.append(f"{abbr}{num}")
-                variants.append(f"{abbr} {num}")
-        return variants
 
     def _check_one(pair: dict) -> dict | None:
         page_text, status = _fetch_page_text(pair["url2"])
@@ -7729,6 +7824,226 @@ def check_structural_elements_soft(content: str, part_number: int) -> list[str]:
         for w in warnings:
             print(w)
     return warnings
+
+
+# ---------------------------------------------------------------------------
+# Content-support stage 2 - deterministic, hard-blocking. Ported 2026-09-06
+# from the sibling notary-document-research-agent branch (same repo family,
+# https://github.com/Andrewdroidsky/notary-document-research-agent), where
+# it was designed and battle-tested first. No LLM call: neither branch's
+# real production workflow configures OPENAI_API_KEY (manual/Codex-driven
+# capture) -- a judge-call design was tried there and rejected twice before
+# landing on this. The second-opinion role is filled by whoever executes
+# capture-part-output (Codex/human) reading the real fetched page excerpt
+# embedded in the block message below -- the same "raise a hard error with
+# concrete evidence, let the active session fix it" pattern every other
+# check in this file already uses (Defense 1-3, title-audit MISMATCH).
+# ---------------------------------------------------------------------------
+
+def check_structural_elements_content_support(content: str, part_number: int) -> list[str]:
+    """Hard-blocking stage 2 of content-support. Reuses the same fetch and
+    variant-matching as check_structural_elements_soft() above (now on
+    stripped visible text, not raw HTML) -- this function's only difference
+    is severity: where the soft check only warns, this one raises, and gives
+    the active session everything it needs to resolve it in one pass:
+      - the exact declared structural element and document name (from the card);
+      - a real excerpt of the fetched page, so the session sees what is
+        actually there instead of taking the mismatch on faith;
+      - a pointer to the source cascade already defined in AGENTS.md;
+      - the existing KARANTIN mechanism (AGENTS.md/CLAUDE.md, "Правила Ссылок
+        И Верификации" -- karantin is explicitly defined for uncertainty
+        about a document's структурный элемент) as the legitimate exit if a
+        genuine search finds no qualifying link -- never framed as "relabel
+        the URL2 level to make the block go away" (a paperwork fix, not a
+        real one).
+    Deliberately NOT a silent pass on any path (unreachable page, timeout) --
+    those are the liveness axis's job (check_url2_title_audit_at_capture),
+    checked separately; this function only ever returns [] when the
+    structural element is genuinely confirmed present in the fetched text.
+    """
+    import concurrent.futures
+
+    if part_number < 2 or part_number > 9:
+        return []
+
+    pairs = _parse_url2_pairs(content)
+    pairs_with_struct = [p for p in pairs if p.get("struct_el") and p.get("url2")]
+    if not pairs_with_struct:
+        return []
+
+    def _check_one(pair: dict) -> str | None:
+        page_text, status = _fetch_page_text(pair["url2"])
+        if status != "ok" or not page_text:
+            return None  # Liveness is a separate axis (check_url2_title_audit_at_capture); not this function's job.
+        if any(v in page_text or v in page_text.lower() for v in _struct_el_variants(pair["struct_el"])):
+            return None  # Confirmed -- real match on the cleaned page text.
+        excerpt = page_text[:500].strip()
+        return (
+            f"[content-support] БЛОК: структурный элемент «{pair['struct_el']}» не найден на странице по URL2.\n"
+            f"  Полное наименование: {pair['doc_name'] or '—'}\n"
+            f"  URL2: {pair['url2']}\n"
+            f"  Реальное начало страницы (первые ~500 символов видимого текста):\n"
+            f"    {excerpt}\n"
+            f"  Требуется реальное исправление, не переклейка статуса: найдите ссылку, действительно "
+            f"ведущую на «{pair['struct_el']}», по каскаду источников из AGENTS.md (КонсультантПлюс → "
+            f"Гарант → Норматив/Контур → Legalacts → Rulaws → официальный правовой портал), и замените "
+            f"URL2/URL1. Если после реального поиска по всему каскаду подходящей ссылки на этот "
+            f"структурный элемент нет — переведите документ в `КАРАНТИН` (AGENTS.md: карантин "
+            f"применяется именно при неопределённости по структурному элементу), не оставляйте карточку "
+            f"с неподтверждённой ссылкой."
+        )
+
+    errors: list[str] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_check_one, p): p for p in pairs_with_struct}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                errors.append(result)
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Freshness — same deterministic, no-LLM architecture as content-support
+# above, applied to a different self-reported card field. Ported 2026-09-06
+# from the sibling notary-document-research-agent branch. Master prompt
+# format (Промпт по поиску документов 18.md, идентичен в обеих ветках):
+# "Статус: действует / утратил силу / действует в редакции от [дата]" +
+# "Актуальность редакции: подтверждена на [дата проверки]" — both currently
+# pure self-report, never cross-checked against the page they cite.
+# ---------------------------------------------------------------------------
+
+_NEGATIVE_STATUS_MARKERS = [
+    "утратил силу", "утратила силу", "утратило силу",
+    "признан утратившим силу", "признана утратившей силу", "признано утратившим силу",
+    "не действует", "прекратил действие", "прекратила действие", "прекратило действие",
+    "отменен", "отменён", "отменена", "отменено",
+]
+
+_NEARBY_SUB_PROVISION_RE = re.compile(
+    r"(статья|стать[яи]|пункт[ае]?|част[ьи]|подпункт[ае]?|абзац\w*|раздел[а]?|глав[аы]|параграф[а]?)"
+    r"\s*\S{0,4}\s*\d",
+    re.IGNORECASE,
+)
+
+
+def _find_whole_document_repeal_marker(page_text_lower: str) -> tuple[str, int] | None:
+    """Scan for a negative-status marker that is NOT immediately preceded by a
+    reference to a specific sub-provision ("Пункт 5 статьи 22 утратил силу" --
+    routine amendment-history text, not a whole-act repeal). Checks every
+    occurrence of every marker, not just the first found anywhere. Returns
+    (marker, index) for the first qualifying occurrence, or None.
+    """
+    for marker in _NEGATIVE_STATUS_MARKERS:
+        start = 0
+        while True:
+            idx = page_text_lower.find(marker, start)
+            if idx == -1:
+                break
+            window = page_text_lower[max(0, idx - 80): idx]
+            if not _NEARBY_SUB_PROVISION_RE.search(window):
+                return (marker, idx)
+            start = idx + len(marker)
+    return None
+
+
+def _parse_status_pairs(content: str) -> list[dict]:
+    """Extract URL2, document name and declared Статус from each card -- same
+    backward-scan pattern as _parse_url2_pairs, reused for a different field.
+    """
+    lines = content.splitlines()
+    pairs: list[dict] = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not re.match(r"^URL2:\s*\S", stripped):
+            continue
+        url_raw = re.sub(r"^URL2:\s*", "", stripped).strip().strip("`").strip()
+        if not url_raw.startswith("http"):
+            continue
+        doc_name = ""
+        card_status = ""
+        for j in range(i - 1, max(i - 26, -1), -1):
+            s = lines[j].strip()
+            if not doc_name and s.startswith("Полное наименование:"):
+                doc_name = re.sub(r"^Полное наименование:\s*", "", s)
+            if not card_status and s.startswith("Статус:"):
+                card_status = re.sub(r"^Статус:\s*", "", s)
+            if doc_name and card_status:
+                break
+        pairs.append({"url2": url_raw, "doc_name": doc_name, "status": card_status})
+    return pairs
+
+
+def _status_claims_in_force(card_status: str) -> bool:
+    """True only for a card that positively claims the act is currently in
+    force ("действует" / "действует в редакции от ..."). A card that already
+    says утратил силу/не действует/etc. has nothing to contradict here.
+    """
+    lowered = card_status.strip().lower()
+    if not lowered:
+        return False
+    if any(m in lowered for m in _NEGATIVE_STATUS_MARKERS):
+        return False
+    return "действует" in lowered
+
+
+def check_status_freshness(content: str, part_number: int) -> list[str]:
+    """Hard-blocking freshness check. For each card claiming its document is
+    currently in force, search the fetched page (same _fetch_page_text as
+    content-support, visible-text) for an explicit marker that it is NOT --
+    "утратил силу", "не действует", etc. Found -> hard block with a real
+    excerpt around the marker, the same AGENTS.md cascade pointer, and
+    КАРАНТИН as the honest exit, per the same architecture as
+    check_structural_elements_content_support (no LLM, no new dependency).
+
+    Amendment-history false positives (a page legitimately saying "Пункт 5
+    ... утратил силу" about ONE provision while the document overall remains
+    in force) are filtered deterministically by _find_whole_document_repeal_marker.
+    """
+    import concurrent.futures
+
+    if part_number < 2 or part_number > 9:
+        return []
+
+    pairs = _parse_status_pairs(content)
+    pairs_in_force = [p for p in pairs if p.get("url2") and _status_claims_in_force(p.get("status", ""))]
+    if not pairs_in_force:
+        return []
+
+    def _check_one(pair: dict) -> str | None:
+        page_text, status = _fetch_page_text(pair["url2"])
+        if status != "ok" or not page_text:
+            return None  # Liveness is a separate axis; not this function's job.
+        lowered = page_text.lower()
+        hit = _find_whole_document_repeal_marker(lowered)
+        if hit is None:
+            return None
+        found, idx = hit
+        excerpt = page_text[max(0, idx - 150): idx + 150].strip()
+        return (
+            f"[freshness] БЛОК: карточка заявляет «Статус: {pair['status']}» (в силе), но реальная "
+            f"страница по URL2 содержит признак утраты силы («{found}»).\n"
+            f"  Полное наименование: {pair['doc_name'] or '—'}\n"
+            f"  URL2: {pair['url2']}\n"
+            f"  Фрагмент страницы рядом с найденным маркером:\n"
+            f"    ...{excerpt}...\n"
+            f"  Требуется реальная проверка: подтвердите действующую редакцию по каскаду источников "
+            f"AGENTS.md (КонсультантПлюс → Гарант → Норматив/Контур → Legalacts → Rulaws → официальный "
+            f"правовой портал) и обновите «Статус»/ссылку, либо переведите документ в `КАРАНТИН`, если "
+            f"актуальность подтвердить не удаётся. Если найденный маркер относится не к самому "
+            f"документу, а к упомянутой на странице истории прежних редакций — явно отметьте это в "
+            f"карточке («Актуальность редакции») вместо того, чтобы оставлять противоречие без ответа."
+        )
+
+    errors: list[str] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_check_one, p): p for p in pairs_in_force}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                errors.append(result)
+    return errors
+
 
 
 def audit_url2_titles(text: str, timeout: int = 6, max_workers: int = 10) -> list[dict]:
@@ -8723,6 +9038,12 @@ def cmd_capture_part_output(args: argparse.Namespace) -> int:
     if title_audit_errors:
         raise RuntimeError("\n".join(title_audit_errors))
     check_structural_elements_soft(content, part_number)
+    content_support_errors = check_structural_elements_content_support(content, part_number)
+    if content_support_errors:
+        raise RuntimeError("\n".join(content_support_errors))
+    freshness_errors = check_status_freshness(content, part_number)
+    if freshness_errors:
+        raise RuntimeError("\n".join(freshness_errors))
 
     # Живая верификация URL2: Python сам открывает каждую ссылку и сравнивает
     # реальный <title> страницы с тем что агент написал в «Заголовок страницы URL2».
@@ -8880,6 +9201,12 @@ def cmd_capture_part_03_range(args: argparse.Namespace) -> int:
     if title_audit_errors:
         raise RuntimeError("\n".join(title_audit_errors))
     check_structural_elements_soft(content, 3)
+    content_support_errors = check_structural_elements_content_support(content, 3)
+    if content_support_errors:
+        raise RuntimeError("\n".join(content_support_errors))
+    freshness_errors = check_status_freshness(content, 3)
+    if freshness_errors:
+        raise RuntimeError("\n".join(freshness_errors))
 
     segment_output_path = get_part_03_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
@@ -8971,6 +9298,12 @@ def cmd_capture_part_04_range(args: argparse.Namespace) -> int:
     if title_audit_errors:
         raise RuntimeError("\n".join(title_audit_errors))
     check_structural_elements_soft(content, 4)
+    content_support_errors = check_structural_elements_content_support(content, 4)
+    if content_support_errors:
+        raise RuntimeError("\n".join(content_support_errors))
+    freshness_errors = check_status_freshness(content, 4)
+    if freshness_errors:
+        raise RuntimeError("\n".join(freshness_errors))
 
     segment_output_path = get_part_04_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
@@ -9061,6 +9394,12 @@ def cmd_capture_part_05_range(args: argparse.Namespace) -> int:
     if title_audit_errors:
         raise RuntimeError("\n".join(title_audit_errors))
     check_structural_elements_soft(content, 5)
+    content_support_errors = check_structural_elements_content_support(content, 5)
+    if content_support_errors:
+        raise RuntimeError("\n".join(content_support_errors))
+    freshness_errors = check_status_freshness(content, 5)
+    if freshness_errors:
+        raise RuntimeError("\n".join(freshness_errors))
 
     segment_output_path = get_part_05_segment_output_path(run_workspace, segment["segment_id"])
     write_text(segment_output_path, content.rstrip() + "\n")
